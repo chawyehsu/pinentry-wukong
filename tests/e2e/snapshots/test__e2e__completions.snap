@@ -1,8 +1,7 @@
 ---
 source: tests/e2e/mod.rs
-assertion_line: 8
 info:
-  program: cliapp
+  program: pinentry-wukong
   args:
     - completions
     - "-h"
@@ -12,14 +11,15 @@ exit_code: 0
 ----- stdout -----
 Generate shell completions
 
-Usage: cliapp completions [OPTIONS] <SHELL>
+Usage: pinentry-wukong completions [OPTIONS] <SHELL>
 
 Arguments:
   <SHELL>  The shell type [possible values: bash, elvish, fish, powershell, zsh]
 
 Options:
-  -v, --verbose...  Increase logging verbosity
-  -q, --quiet...    Decrease logging verbosity
-  -h, --help        Print help
+  -v, --verbose...       Increase logging verbosity
+  -q, --quiet...         Decrease logging verbosity
+      --log-file <PATH>  Write logs to a file instead of stderr (useful for debugging TUI mode)
+  -h, --help             Print help
 
 ----- stderr -----

@@ -1,5 +1,8 @@
 mod cmd;
-mod observability;
+mod keychain;
+mod server;
+mod state;
+mod ui;
 
 #[tokio::main(flavor = "current_thread")]
 pub async fn main() {

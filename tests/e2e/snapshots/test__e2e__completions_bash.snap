@@ -1,7 +1,8 @@
 ---
 source: tests/e2e/mod.rs
+assertion_line: 12
 info:
-  program: cliapp
+  program: pinentry-wukong
   args:
     - completions
     - bash
@@ -9,7 +10,7 @@ info:
 success: true
 exit_code: 0
 ----- stdout -----
-_cliapp() {
+_pinentry-wukong() {
     local i cur prev opts cmd
     COMPREPLY=()
     if [[ "${BASH_VERSINFO[0]}" -ge 4 ]]; then
@@ -25,19 +26,25 @@ _cliapp() {
     do
         case "${cmd},${i}" in
             ",$1")
-                cmd="cliapp"
+                cmd="pinentry__wukong"
                 ;;
-            cliapp,completions)
-                cmd="cliapp__completions"
+            pinentry__wukong,completions)
+                cmd="pinentry__wukong__subcmd__completions"
                 ;;
-            cliapp,help)
-                cmd="cliapp__help"
+            pinentry__wukong,help)
+                cmd="pinentry__wukong__subcmd__help"
                 ;;
-            cliapp__help,completions)
-                cmd="cliapp__help__completions"
+            pinentry__wukong,serve)
+                cmd="pinentry__wukong__subcmd__serve"
                 ;;
-            cliapp__help,help)
-                cmd="cliapp__help__help"
+            pinentry__wukong__subcmd__help,completions)
+                cmd="pinentry__wukong__subcmd__help__subcmd__completions"
+                ;;
+            pinentry__wukong__subcmd__help,help)
+                cmd="pinentry__wukong__subcmd__help__subcmd__help"
+                ;;
+            pinentry__wukong__subcmd__help,serve)
+                cmd="pinentry__wukong__subcmd__help__subcmd__serve"
                 ;;
             *)
                 ;;
@@ -45,13 +52,69 @@ _cliapp() {
     done
 
     case "${cmd}" in
-        cliapp)
-            opts="-v -q -h -V --verbose --quiet --help --version completions help"
+        pinentry__wukong)
+            opts="-v -q -d -D -T -N -C -M -o -g -h -V --verbose --quiet --log-file --debug --display --ttyname --ttytype --lc-ctype --lc-messages --timeout --no-global-grab --ui --no-keychain --help --version serve completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --log-file)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --display)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -D)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ttyname)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -T)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ttytype)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -N)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --lc-ctype)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -C)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --lc-messages)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -M)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -o)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ui)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -59,8 +122,26 @@ _cliapp() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        cliapp__completions)
-            opts="-v -q -h --verbose --quiet --help bash elvish fish powershell zsh"
+        pinentry__subcmd__wukong__subcmd__completions)
+            opts="-v -q -h --verbose --quiet --log-file --help bash elvish fish powershell zsh"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --log-file)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__help)
+            opts="serve completions help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -73,21 +154,7 @@ _cliapp() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        cliapp__help)
-            opts="completions help"
-            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
-                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-                return 0
-            fi
-            case "${prev}" in
-                *)
-                    COMPREPLY=()
-                    ;;
-            esac
-            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
-            return 0
-            ;;
-        cliapp__help__completions)
+        pinentry__subcmd__wukong__subcmd__help__subcmd__completions)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -101,13 +168,97 @@ _cliapp() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        cliapp__help__help)
+        pinentry__subcmd__wukong__subcmd__help__subcmd__help)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__help__subcmd__serve)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__serve)
+            opts="-d -D -T -N -C -M -o -g -v -q -h --debug --display --ttyname --ttytype --lc-ctype --lc-messages --timeout --no-global-grab --ui --no-keychain --verbose --quiet --log-file --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --display)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -D)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ttyname)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -T)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ttytype)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -N)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --lc-ctype)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -C)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --lc-messages)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -M)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --timeout)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                -o)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --ui)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --log-file)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 *)
                     COMPREPLY=()
                     ;;
@@ -119,9 +270,9 @@ _cliapp() {
 }
 
 if [[ "${BASH_VERSINFO[0]}" -eq 4 && "${BASH_VERSINFO[1]}" -ge 4 || "${BASH_VERSINFO[0]}" -gt 4 ]]; then
-    complete -F _cliapp -o nosort -o bashdefault -o default cliapp
+    complete -F _pinentry-wukong -o nosort -o bashdefault -o default pinentry-wukong
 else
-    complete -F _cliapp -o bashdefault -o default cliapp
+    complete -F _pinentry-wukong -o bashdefault -o default pinentry-wukong
 fi
 
 

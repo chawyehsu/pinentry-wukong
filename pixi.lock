@@ -1,10 +1,12 @@
-version: 6
+version: 7
+platforms:
+- name: linux-64
+- name: osx-arm64
+- name: win-64
 environments:
   default:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
-    options:
-      pypi-prerelease-mode: if-necessary-or-explicit
     packages:
       linux-64:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
@@ -48,28 +50,6 @@ packages:
   license_family: APACHE
   size: 1753737
   timestamp: 1770054567440
-- conda: https://conda.anaconda.org/conda-forge/osx-arm64/cargo-insta-1.46.3-h6fdd925_0.conda
-  sha256: 8aafa78e2349b6e608f88c9a48b184e44ae0365fc78ef8d6e84a70f7c76889a4
-  md5: b4676b6bb4729c977ad123dc11e292b6
-  depends:
-  - __osx >=11.0
-  constrains:
-  - __osx >=11.0
-  license: Apache-2.0
-  license_family: APACHE
-  size: 1599079
-  timestamp: 1770054590503
-- conda: https://conda.anaconda.org/conda-forge/win-64/cargo-insta-1.46.3-h18a1a76_0.conda
-  sha256: 9ba482e5e8b87ec21530581957bd607f0b0d437e52b71064686054cddb0181a3
-  md5: 56502a11d6d8233b55aee840ec4c805d
-  depends:
-  - vc >=14.3,<15
-  - vc14_runtime >=14.44.35208
-  - ucrt >=10.0.20348.0
-  license: Apache-2.0
-  license_family: APACHE
-  size: 1888341
-  timestamp: 1770054618206
 - conda: https://conda.anaconda.org/conda-forge/linux-64/cargo-llvm-cov-0.8.4-hdab8a38_0.conda
   sha256: f2220021da3d425537d0471e9b4bf20140118518f82f97321ec4c9fdd64bf7c2
   md5: baaa6861dceca2b6fc3cf85d066ae771
@@ -82,28 +62,6 @@ packages:
   license_family: Apache
   size: 1339745
   timestamp: 1770419012733
-- conda: https://conda.anaconda.org/conda-forge/osx-arm64/cargo-llvm-cov-0.8.4-h748bcf4_0.conda
-  sha256: 3a35cd7ef64cf02ba6d41816dacee986f00b4c587bb210f4709d59cbaa31d38a
-  md5: 53cf061e5a26a0468704908495ac04dc
-  depends:
-  - __osx >=11.0
-  constrains:
-  - __osx >=11.0
-  license: Apache-2.0
-  license_family: Apache
-  size: 1156202
-  timestamp: 1770419483058
-- conda: https://conda.anaconda.org/conda-forge/win-64/cargo-llvm-cov-0.8.4-h77a83cd_0.conda
-  sha256: bbf18411e41a22becab336675fb535b28d8728a39012efbd168bad79cfc6d3d3
-  md5: 1ac29034d57a21829841f2c6d7ff1169
-  depends:
-  - ucrt >=10.0.20348.0
-  - vc >=14.3,<15
-  - vc14_runtime >=14.44.35208
-  license: Apache-2.0
-  license_family: Apache
-  size: 1311802
-  timestamp: 1770419166802
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.2.0-he0feb66_18.conda
   sha256: faf7d2017b4d718951e3a59d081eb09759152f93038479b768e3d612688f83f5
   md5: 0aa00f03f9e39fb9876085dee11a85d4
@@ -126,6 +84,50 @@ packages:
   license_family: GPL
   size: 603262
   timestamp: 1771378117851
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/cargo-insta-1.46.3-h6fdd925_0.conda
+  sha256: 8aafa78e2349b6e608f88c9a48b184e44ae0365fc78ef8d6e84a70f7c76889a4
+  md5: b4676b6bb4729c977ad123dc11e292b6
+  depends:
+  - __osx >=11.0
+  constrains:
+  - __osx >=11.0
+  license: Apache-2.0
+  license_family: APACHE
+  size: 1599079
+  timestamp: 1770054590503
+- conda: https://conda.anaconda.org/conda-forge/osx-arm64/cargo-llvm-cov-0.8.4-h748bcf4_0.conda
+  sha256: 3a35cd7ef64cf02ba6d41816dacee986f00b4c587bb210f4709d59cbaa31d38a
+  md5: 53cf061e5a26a0468704908495ac04dc
+  depends:
+  - __osx >=11.0
+  constrains:
+  - __osx >=11.0
+  license: Apache-2.0
+  license_family: Apache
+  size: 1156202
+  timestamp: 1770419483058
+- conda: https://conda.anaconda.org/conda-forge/win-64/cargo-insta-1.46.3-h18a1a76_0.conda
+  sha256: 9ba482e5e8b87ec21530581957bd607f0b0d437e52b71064686054cddb0181a3
+  md5: 56502a11d6d8233b55aee840ec4c805d
+  depends:
+  - vc >=14.3,<15
+  - vc14_runtime >=14.44.35208
+  - ucrt >=10.0.20348.0
+  license: Apache-2.0
+  license_family: APACHE
+  size: 1888341
+  timestamp: 1770054618206
+- conda: https://conda.anaconda.org/conda-forge/win-64/cargo-llvm-cov-0.8.4-h77a83cd_0.conda
+  sha256: bbf18411e41a22becab336675fb535b28d8728a39012efbd168bad79cfc6d3d3
+  md5: 1ac29034d57a21829841f2c6d7ff1169
+  depends:
+  - ucrt >=10.0.20348.0
+  - vc >=14.3,<15
+  - vc14_runtime >=14.44.35208
+  license: Apache-2.0
+  license_family: Apache
+  size: 1311802
+  timestamp: 1770419166802
 - conda: https://conda.anaconda.org/conda-forge/win-64/ucrt-10.0.26100.0-h57928b3_0.conda
   sha256: 3005729dce6f3d3f5ec91dfc49fc75a0095f9cd23bab49efb899657297ac91a5
   md5: 71b24316859acd00bdb8b38f5e2ce328

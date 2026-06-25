@@ -1,6 +1,4 @@
 [workspace]
-name = "template-cliapp"
-authors = ["Chawye Hsu <su+git@chawyehsu.com>"]
 channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64", "win-64"]
 

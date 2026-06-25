@@ -1,20 +1,36 @@
 [package]
-name = "cliapp"
-description = "A CLI App project template"
-homepage = "https://github.com/chawyehsu/template-cliapp"
-repository = "https://github.com/chawyehsu/template-cliapp"
+name = "pinentry-wukong"
+description = "A versatile pinentry alternative"
+homepage = "https://github.com/chawyehsu/pinentry-wukong"
+repository = "https://github.com/chawyehsu/pinentry-wukong"
 version = "0.1.0"
 authors = ["Chawye Hsu <su+git@chawyehsu.com>"]
 edition = "2024"
+license = "GPL-2.0-only"
+
+[[bin]]
+name = "pinentry-wukong"
+path = "src/main.rs"
 
 [dependencies]
+assuan = "0.1.2"
 clap = { version = "4.5", features = ["derive"] }
 clap-verbosity-flag = { version = "3.0.4", features = ["tracing"] }
 clap_complete = "4.5.66"
+crossterm = "0.28"
+keyring = { version = "3", features = [
+    "apple-native",
+    "sync-secret-service",
+    "windows-native",
+] }
+libc = "0.2"
 miette = { version = "7.6.0", features = ["fancy"] }
+ratatui = "0.29"
+rpassword = "7.5.4"
 tokio = { version = "1.50.0", features = ["macros", "rt"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+zeroize = { version = "1.8", features = ["derive"] }
 
 [dev-dependencies]
 assert_fs = "1.1.3"
