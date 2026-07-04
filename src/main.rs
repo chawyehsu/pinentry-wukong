@@ -1,0 +1,10 @@
+mod cmd;
+mod observability;
+
+#[tokio::main(flavor = "current_thread")]
+pub async fn main() {
+    if let Err(err) = cmd::start().await {
+        eprintln!("{err:?}");
+        std::process::exit(1);
+    }
+}
