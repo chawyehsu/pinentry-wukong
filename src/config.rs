@@ -104,9 +104,11 @@ impl Config {
     }
 }
 
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+
 /// Resolve the config file path.
 ///
-/// Priority: CLI `--config` > `$XDG_CONFIG_HOME/pinentry-wukong/config.toml` > platform default.
+/// Priority: CLI `--config` > `$XDG_CONFIG_HOME/<pkg>/config.toml` > platform default.
 pub fn resolve_config_path(cli_path: Option<&Path>) -> PathBuf {
     if let Some(path) = cli_path {
         return path.to_path_buf();
@@ -117,39 +119,37 @@ pub fn resolve_config_path(cli_path: Option<&Path>) -> PathBuf {
         .ok()
         .filter(|v| !v.is_empty())
     {
-        return PathBuf::from(xdg)
-            .join("pinentry-wukong")
-            .join("config.toml");
+        return PathBuf::from(xdg).join(PKG_NAME).join("config.toml");
     }
 
     // Fall back to platform-specific default via `directories` crate
-    if let Some(proj_dirs) = ProjectDirs::from("", "", "pinentry-wukong") {
+    if let Some(proj_dirs) = ProjectDirs::from("", "", PKG_NAME) {
         return proj_dirs.config_dir().join("config.toml");
     }
 
     // Last resort
-    PathBuf::from("pinentry-wukong-config.toml")
+    PathBuf::from(format!("{PKG_NAME}-config.toml"))
 }
 
 /// Resolve the log file path.
 ///
-/// Priority: `$XDG_CACHE_HOME/pinentry-wukong.log` > platform default.
+/// Priority: `$XDG_CACHE_HOME/<pkg>.log` > platform default.
 pub fn resolve_log_path() -> PathBuf {
     // Check XDG_CACHE_HOME env var first (works on all platforms, including Windows)
     if let Some(xdg) = std::env::var("XDG_CACHE_HOME")
         .ok()
         .filter(|v| !v.is_empty())
     {
-        return PathBuf::from(xdg).join("pinentry-wukong.log");
+        return PathBuf::from(xdg).join(format!("{PKG_NAME}.log"));
     }
 
     // Fall back to platform-specific default via `directories` crate
-    if let Some(proj_dirs) = ProjectDirs::from("", "", "pinentry-wukong") {
-        return proj_dirs.cache_dir().join("pinentry-wukong.log");
+    if let Some(proj_dirs) = ProjectDirs::from("", "", PKG_NAME) {
+        return proj_dirs.cache_dir().join(format!("{PKG_NAME}.log"));
     }
 
     // Last resort
-    PathBuf::from("pinentry-wukong.log")
+    PathBuf::from(format!("{PKG_NAME}.log"))
 }
 
 #[cfg(test)]
