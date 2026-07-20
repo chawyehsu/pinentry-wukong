@@ -93,10 +93,12 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
                 Request::Command { .. } => match Command::try_from(req) {
                     Ok(cmd) => {
                         if let Err(e) = self.handle_command(cmd, ui) {
+                            tracing::error!("command error: {e}");
                             let _ = self.send(e.into());
                         }
                     }
                     Err(e) => {
+                        tracing::error!("command parse error: {e}");
                         let _ = self.send(e.into());
                     }
                 },
@@ -205,6 +207,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
     }
 
     fn handle_getpin(&mut self, ui: &dyn PinentryUi) -> Result<(), Error> {
+        tracing::debug!("GETPIN: handling request");
         // Try keychain lookup first
         if self.state.allow_external_password_cache
             && self.state.keyinfo.is_some()
@@ -218,7 +221,10 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
                 && let Some(cached) = keychain.lookup(keygrip)
                 && !cached.is_empty()
             {
-                tracing::info!("password found in cache for key {keygrip}");
+                tracing::info!(
+                    "password found in cache for key {keygrip} ({} bytes)",
+                    cached.len()
+                );
                 self.state.pin_from_cache = true;
                 self.send(Response::status("PASSWORD_FROM_CACHE", ""))?;
                 self.send(Response::data(cached.as_bytes().to_vec()))?;
@@ -227,6 +233,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
             }
         }
 
+        tracing::debug!("GETPIN: prompting user via UI");
         let result = ui
             .get_pin(&self.state)
             .map_err(|e| Error::new(ErrorCode::GENERAL, e.to_string()))?;
@@ -258,6 +265,8 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
                                     tracing::warn!("failed to save password to keychain: {e}")
                                 }
                             }
+                        } else {
+                            tracing::warn!("keychain save requested but no keychain backend");
                         }
                     } else {
                         tracing::debug!(

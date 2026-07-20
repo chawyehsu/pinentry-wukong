@@ -1,5 +1,6 @@
 ---
 source: tests/e2e/mod.rs
+assertion_line: 11
 info:
   program: pinentry-wukong
   args:
@@ -19,7 +20,7 @@ Arguments:
 Options:
   -v, --verbose...       Increase logging verbosity
   -q, --quiet...         Decrease logging verbosity
-      --log-file <PATH>  Write logs to a file instead of stderr (useful for debugging TUI mode)
+      --log-file <PATH>  Write logs to a file instead of the default <exe>.log
   -h, --help             Print help
 
 ----- stderr -----

@@ -1,4 +1,3 @@
-use std::env;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
 
@@ -21,11 +20,11 @@ pub struct App {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// The verbosity level
+    /// The verbosity level (default: trace)
     #[command(flatten)]
     verbose: Verbosity,
 
-    /// Write logs to a file instead of stderr (useful for debugging TUI mode)
+    /// Write logs to a file instead of the default <exe>.log
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<PathBuf>,
 
@@ -43,11 +42,20 @@ pub enum Command {
     Completions(completions::Args),
 }
 
+/// Resolve the log file path: explicit `--log-file` wins, otherwise `<exe>.log`.
+fn resolve_log_file(explicit: Option<&PathBuf>) -> miette::Result<PathBuf> {
+    if let Some(path) = explicit {
+        return Ok(path.clone());
+    }
+    let exe = std::env::current_exe().into_diagnostic()?;
+    Ok(exe.with_extension("log"))
+}
+
 /// Setup the global logger with the given level filter.
 ///
-/// If `log_file` is specified, logs go to that file instead of stderr.
-/// This is essential for debugging since the TUI redirects stderr.
-fn setup_logger(level_filter: LevelFilter, log_file: Option<&PathBuf>) -> miette::Result<()> {
+/// Logs always go to a file (default: `<exe>.log`). This is essential for
+/// debugging since the TUI redirects stderr.
+fn setup_logger(level_filter: LevelFilter, log_file: &PathBuf) -> miette::Result<()> {
     let low_level_filter = match level_filter {
         LevelFilter::OFF => LevelFilter::OFF,
         LevelFilter::ERROR => LevelFilter::ERROR,
@@ -74,30 +82,21 @@ fn setup_logger(level_filter: LevelFilter, log_file: Option<&PathBuf>) -> miette
                 .into_diagnostic()?,
         );
 
-    if let Some(path) = log_file {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .into_diagnostic()?;
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+        .into_diagnostic()?;
 
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(file)
-            .with_ansi(false)
-            .without_time();
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file)
+        .with_ansi(false)
+        .without_time();
 
-        tracing_subscriber::registry()
-            .with(layer_env_filter)
-            .with(file_layer)
-            .init();
-    } else {
-        let layer_fmt = tracing_subscriber::fmt::layer().without_time();
-
-        tracing_subscriber::registry()
-            .with(layer_env_filter)
-            .with(layer_fmt)
-            .init();
-    }
+    tracing_subscriber::registry()
+        .with(layer_env_filter)
+        .with(file_layer)
+        .init();
 
     Ok(())
 }
@@ -105,7 +104,17 @@ fn setup_logger(level_filter: LevelFilter, log_file: Option<&PathBuf>) -> miette
 /// CLI entry point
 pub async fn start() -> miette::Result<()> {
     let args = App::parse();
-    setup_logger(args.verbose.tracing_level_filter(), args.log_file.as_ref())?;
+
+    // Default to TRACE unless the user explicitly set a verbosity level.
+    let level = if args.verbose.is_present() {
+        args.verbose.tracing_level_filter()
+    } else {
+        LevelFilter::TRACE
+    };
+
+    let log_file = resolve_log_file(args.log_file.as_ref())?;
+    setup_logger(level, &log_file)?;
+    tracing::info!("logging to {}", log_file.display());
 
     match args.command {
         Some(Command::Serve(args)) => serve::execute(args).await?,
