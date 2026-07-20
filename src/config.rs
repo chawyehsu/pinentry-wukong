@@ -113,7 +113,10 @@ pub fn resolve_config_path(cli_path: Option<&Path>) -> PathBuf {
     }
 
     // Check XDG_CONFIG_HOME env var first (works on all platforms, including Windows)
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+    if let Some(xdg) = std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|v| !v.is_empty())
+    {
         return PathBuf::from(xdg)
             .join("pinentry-wukong")
             .join("config.toml");
@@ -133,7 +136,10 @@ pub fn resolve_config_path(cli_path: Option<&Path>) -> PathBuf {
 /// Priority: `$XDG_CACHE_HOME/pinentry-wukong.log` > platform default.
 pub fn resolve_log_path() -> PathBuf {
     // Check XDG_CACHE_HOME env var first (works on all platforms, including Windows)
-    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+    if let Some(xdg) = std::env::var("XDG_CACHE_HOME")
+        .ok()
+        .filter(|v| !v.is_empty())
+    {
         return PathBuf::from(xdg).join("pinentry-wukong.log");
     }
 
