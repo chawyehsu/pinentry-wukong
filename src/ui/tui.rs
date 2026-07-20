@@ -1,4 +1,3 @@
-use std::os::unix::io::RawFd;
 use std::time::{Duration, Instant};
 
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
@@ -12,6 +11,11 @@ use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
 use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
 use crate::ui::PinentryUi;
+
+#[cfg(unix)]
+type TtyHandle = std::os::unix::io::RawFd;
+#[cfg(windows)]
+type TtyHandle = (); // Windows uses crossterm events, no raw fd needed
 
 type TuiTerminal = Terminal<CrosstermBackend<std::io::Stdout>>;
 
@@ -33,20 +37,12 @@ impl PinentryUi for TuiUi {
         let guard = TtyGuard::redirect(state)?;
         tracing::debug!("TUI: TtyGuard created, enabling raw mode");
         let mut terminal = create_terminal()?;
-        let tty_fd = guard.tty_fd();
-        tracing::debug!("TUI: terminal created, entering get_pin loop (tty_fd={tty_fd})");
-        // Verify fd is still valid before entering the loop
-        let check = unsafe { libc::fcntl(tty_fd, libc::F_GETFD) };
-        let isatty = unsafe { libc::isatty(tty_fd) };
-        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-        let stat_ok = unsafe { libc::fstat(tty_fd, &mut stat) };
-        tracing::debug!(
-            "TUI: fd={tty_fd}: fcntl={check}, isatty={isatty}, fstat={stat_ok}, mode={:#o}",
-            stat.st_mode
-        );
-        let result = run_getpin(&mut terminal, tty_fd, state);
+        #[allow(clippy::let_unit_value)]
+        let handle = guard.handle();
+        tracing::debug!("TUI: terminal created, entering get_pin loop");
+        let result = run_getpin(&mut terminal, handle, state);
         tracing::debug!("TUI: get_pin loop exited with result: {:?}", result.is_ok());
-        cleanup_terminal(tty_fd)?;
+        cleanup_terminal()?;
         drop(terminal);
         drop(guard);
         result
@@ -55,9 +51,10 @@ impl PinentryUi for TuiUi {
     fn confirm(&self, state: &PinentryState) -> miette::Result<ConfirmResult> {
         let guard = TtyGuard::redirect(state)?;
         let mut terminal = create_terminal()?;
-        let tty_fd = guard.tty_fd();
-        let result = run_confirm(&mut terminal, tty_fd, state);
-        cleanup_terminal(tty_fd)?;
+        #[allow(clippy::let_unit_value)]
+        let handle = guard.handle();
+        let result = run_confirm(&mut terminal, handle, state);
+        cleanup_terminal()?;
         drop(terminal);
         drop(guard);
         result
@@ -66,24 +63,30 @@ impl PinentryUi for TuiUi {
     fn message(&self, state: &PinentryState) -> miette::Result<()> {
         let guard = TtyGuard::redirect(state)?;
         let mut terminal = create_terminal()?;
-        let tty_fd = guard.tty_fd();
-        let result = run_message(&mut terminal, tty_fd, state);
-        cleanup_terminal(tty_fd)?;
+        #[allow(clippy::let_unit_value)]
+        let handle = guard.handle();
+        let result = run_message(&mut terminal, handle, state);
+        cleanup_terminal()?;
         drop(terminal);
         drop(guard);
         result
     }
 }
 
-/// RAII guard that redirects stdin/stdout to the terminal device.
+// -- Platform-specific TtyGuard --
+
+#[cfg(unix)]
 struct TtyGuard {
-    saved_stdin: RawFd,
-    saved_stdout: RawFd,
-    tty_fd: RawFd,
+    saved_stdin: std::os::unix::io::RawFd,
+    saved_stdout: std::os::unix::io::RawFd,
+    tty_fd: std::os::unix::io::RawFd,
 }
 
+#[cfg(unix)]
 impl TtyGuard {
     fn redirect(state: &PinentryState) -> miette::Result<Self> {
+        use std::os::unix::io::RawFd;
+
         let path = state
             .ttyname
             .clone()
@@ -136,7 +139,6 @@ impl TtyGuard {
             return Err(miette::miette!("failed to redirect fds to tty"));
         }
 
-        // Keep tty_fd open — we read input from it directly
         tracing::debug!("TUI: stdin/stdout redirected to {path} (tty_fd={tty_fd})");
         Ok(Self {
             saved_stdin,
@@ -145,11 +147,12 @@ impl TtyGuard {
         })
     }
 
-    fn tty_fd(&self) -> RawFd {
+    fn handle(&self) -> TtyHandle {
         self.tty_fd
     }
 }
 
+#[cfg(unix)]
 impl Drop for TtyGuard {
     fn drop(&mut self) {
         unsafe {
@@ -163,6 +166,31 @@ impl Drop for TtyGuard {
     }
 }
 
+#[cfg(windows)]
+struct TtyGuard;
+
+#[cfg(windows)]
+impl TtyGuard {
+    fn redirect(_state: &PinentryState) -> miette::Result<Self> {
+        // On Windows, crossterm uses ReadConsoleInputW/WriteConsoleOutputW
+        // which don't conflict with stdin/stdout fd redirections.
+        // No fd manipulation needed — stdin/stdout work directly.
+        tracing::debug!("TUI: Windows — no fd redirection needed");
+        Ok(Self)
+    }
+
+    fn handle(&self) -> TtyHandle {}
+}
+
+#[cfg(windows)]
+impl Drop for TtyGuard {
+    fn drop(&mut self) {
+        tracing::debug!("TUI: Windows — no fd restoration needed");
+    }
+}
+
+// -- Terminal setup and cleanup --
+
 fn create_terminal() -> miette::Result<TuiTerminal> {
     enable_raw_mode().into_diagnostic()?;
     let backend = CrosstermBackend::new(std::io::stdout());
@@ -171,32 +199,35 @@ fn create_terminal() -> miette::Result<TuiTerminal> {
     Ok(terminal)
 }
 
-/// Clean up terminal state: disable raw mode, leave alternate screen, show cursor.
-/// Writes escape sequences directly to the TTY fd to ensure they reach the terminal.
-fn cleanup_terminal(tty_fd: RawFd) -> miette::Result<()> {
-    // First disable raw mode (restores terminal settings)
+#[cfg(unix)]
+fn cleanup_terminal() -> miette::Result<()> {
     disable_raw_mode().into_diagnostic()?;
-
-    // Then write escape sequences directly to the TTY
-    unsafe {
-        // Leave alternate screen
-        libc::write(tty_fd, b"\x1b[?1049l".as_ptr() as *const _, 8);
-        // Show cursor
-        libc::write(tty_fd, b"\x1b[?25h".as_ptr() as *const _, 6);
-        // Reset scroll region
-        libc::write(tty_fd, b"\x1b[r".as_ptr() as *const _, 2);
-        // Move cursor to bottom of screen
-        libc::write(tty_fd, b"\x1b[999;1H".as_ptr() as *const _, 8);
-        // Newline
-        libc::write(tty_fd, b"\n".as_ptr() as *const _, 1);
-    }
-
+    // On Unix, write escape sequences directly to the TTY to ensure they
+    // reach the terminal even if stdout has been redirected.
+    use std::io::Write;
+    let mut tty = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .into_diagnostic()?;
+    tty.write_all(b"\x1b[?1049l").ok(); // leave alternate screen
+    tty.write_all(b"\x1b[?25h").ok(); // show cursor
+    tty.write_all(b"\x1b[r").ok(); // reset scroll region
+    tty.write_all(b"\x1b[999;1H").ok(); // move cursor to bottom
+    tty.write_all(b"\n").ok();
     Ok(())
 }
 
-// -- Key input via raw fd --
+#[cfg(windows)]
+fn cleanup_terminal() -> miette::Result<()> {
+    disable_raw_mode().into_diagnostic()?;
+    // On Windows, crossterm handles terminal cleanup via the Console API.
+    // The escape sequences are processed by the Windows terminal directly.
+    Ok(())
+}
 
-/// A parsed key event from raw terminal input.
+// -- Key input --
+
+/// A parsed key event from terminal input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Key {
     Char(char),
@@ -210,8 +241,8 @@ enum Key {
     Right,
 }
 
-/// Read a single key from the TTY fd. Blocks until a key is available.
-fn read_key(tty_fd: RawFd) -> Option<Key> {
+#[cfg(unix)]
+fn read_key(tty_fd: std::os::unix::io::RawFd) -> Option<Key> {
     let mut byte = [0u8; 1];
     loop {
         let n = unsafe { libc::read(tty_fd, byte.as_mut_ptr() as *mut _, 1) };
@@ -220,13 +251,11 @@ fn read_key(tty_fd: RawFd) -> Option<Key> {
         }
         match byte[0] {
             b'\r' | b'\n' => return Some(Key::Enter),
-            0x7f | 0x08 => return Some(Key::Backspace), // DEL or BS
-            0x03 => return Some(Key::CtrlC),            // Ctrl+C
-            0x09 => return Some(Key::Tab),              // Tab
+            0x7f | 0x08 => return Some(Key::Backspace),
+            0x03 => return Some(Key::CtrlC),
+            0x09 => return Some(Key::Tab),
             0x1b => {
-                // Escape sequence — read next bytes
                 let mut seq = [0u8; 2];
-                // Use select() with short timeout for escape sequences
                 let ready = unsafe {
                     let mut seqfds: libc::fd_set = std::mem::zeroed();
                     libc::FD_ZERO(&mut seqfds);
@@ -234,7 +263,7 @@ fn read_key(tty_fd: RawFd) -> Option<Key> {
                     let mut seq_tv = libc::timeval {
                         tv_sec: 0,
                         tv_usec: 50_000,
-                    }; // 50ms
+                    };
                     let r = libc::select(
                         tty_fd + 1,
                         &mut seqfds,
@@ -250,7 +279,7 @@ fn read_key(tty_fd: RawFd) -> Option<Key> {
                         match seq[1] {
                             b'D' => return Some(Key::Left),
                             b'C' => return Some(Key::Right),
-                            b'Z' => return Some(Key::BackTab), // Shift+Tab
+                            b'Z' => return Some(Key::BackTab),
                             _ => {}
                         }
                     }
@@ -258,16 +287,13 @@ fn read_key(tty_fd: RawFd) -> Option<Key> {
                 return Some(Key::Esc);
             }
             c if (0x20..=0x7e).contains(&c) => return Some(Key::Char(c as char)),
-            _ => {} // ignore other control characters
+            _ => {}
         }
     }
 }
 
-/// Block until a key is available or timeout expires.
-///
-/// Uses `select()` instead of `poll()` because macOS `poll()` returns
-/// `POLLNVAL` for `/dev/tty` file descriptors.
-fn poll_key(tty_fd: RawFd, timeout: Duration) -> Option<Key> {
+#[cfg(unix)]
+fn poll_key(tty_fd: std::os::unix::io::RawFd, timeout: Duration) -> Option<Key> {
     unsafe {
         let mut readfds: libc::fd_set = std::mem::zeroed();
         libc::FD_ZERO(&mut readfds);
@@ -291,6 +317,72 @@ fn poll_key(tty_fd: RawFd, timeout: Duration) -> Option<Key> {
         } else {
             None
         }
+    }
+}
+
+#[cfg(windows)]
+fn crossterm_event_to_key(event: crossterm::event::Event) -> Option<Key> {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    match event {
+        Event::Key(KeyEvent {
+            code, modifiers, ..
+        }) => match code {
+            KeyCode::Enter => Some(Key::Enter),
+            KeyCode::Esc => Some(Key::Esc),
+            KeyCode::Backspace => Some(Key::Backspace),
+            KeyCode::Tab => Some(Key::Tab),
+            KeyCode::Left => Some(Key::Left),
+            KeyCode::Right => Some(Key::Right),
+            KeyCode::Char(c) => {
+                if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                    Some(Key::CtrlC)
+                } else {
+                    Some(Key::Char(c))
+                }
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+#[allow(dead_code)]
+fn read_key(_handle: TtyHandle) -> Option<Key> {
+    use crossterm::event;
+    match event::read().ok() {
+        Some(ev) => crossterm_event_to_key(ev),
+        None => None,
+    }
+}
+
+#[cfg(windows)]
+fn poll_key(_handle: TtyHandle, timeout: Duration) -> Option<Key> {
+    use crossterm::event;
+    if event::poll(timeout).ok() == Some(true) {
+        match event::read().ok() {
+            Some(ev) => {
+                // Handle Shift+Tab (BackTab) — crossterm on Windows sends
+                // KeyCode::BackTab directly, but let's also handle the
+                // modifier variant.
+                use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+                match &ev {
+                    Event::Key(KeyEvent {
+                        code: KeyCode::Tab,
+                        modifiers,
+                        ..
+                    }) if modifiers.contains(KeyModifiers::SHIFT) => Some(Key::BackTab),
+                    Event::Key(KeyEvent {
+                        code: KeyCode::BackTab,
+                        ..
+                    }) => Some(Key::BackTab),
+                    _ => crossterm_event_to_key(ev),
+                }
+            }
+            None => None,
+        }
+    } else {
+        None
     }
 }
 
@@ -347,7 +439,7 @@ impl ConfirmFocus {
 
 fn run_getpin(
     terminal: &mut TuiTerminal,
-    tty_fd: RawFd,
+    handle: TtyHandle,
     state: &PinentryState,
 ) -> miette::Result<GetPinResult> {
     let title = state.title.as_deref().unwrap_or("pinentry-wukong");
@@ -449,7 +541,7 @@ fn run_getpin(
             .map(|t| t.saturating_sub(start.elapsed()))
             .unwrap_or(Duration::from_millis(100));
 
-        if let Some(key) = poll_key(tty_fd, poll) {
+        if let Some(key) = poll_key(handle, poll) {
             match handle_getpin_key(key, &mut focus, &mut input) {
                 GetPinAction::Continue => {}
                 GetPinAction::Submit => {
@@ -524,7 +616,7 @@ fn handle_getpin_key(key: Key, focus: &mut GetPinFocus, input: &mut String) -> G
 
 fn run_confirm(
     terminal: &mut TuiTerminal,
-    tty_fd: RawFd,
+    handle: TtyHandle,
     state: &PinentryState,
 ) -> miette::Result<ConfirmResult> {
     let title = state.title.as_deref().unwrap_or("pinentry-wukong");
@@ -611,7 +703,7 @@ fn run_confirm(
         let poll = timeout
             .map(|t| t.saturating_sub(start.elapsed()))
             .unwrap_or(Duration::from_millis(100));
-        if let Some(key) = poll_key(tty_fd, poll) {
+        if let Some(key) = poll_key(handle, poll) {
             if key == Key::CtrlC || key == Key::Esc {
                 return Ok(ConfirmResult::Canceled);
             }
@@ -649,7 +741,7 @@ fn run_confirm(
 
 fn run_message(
     terminal: &mut TuiTerminal,
-    tty_fd: RawFd,
+    handle: TtyHandle,
     state: &PinentryState,
 ) -> miette::Result<()> {
     let title = state.title.as_deref().unwrap_or("pinentry-wukong");
@@ -696,11 +788,10 @@ fn run_message(
             })
             .into_diagnostic()?;
 
-        if let Some(key) = poll_key(tty_fd, Duration::from_millis(100)) {
-            match key {
-                Key::Enter | Key::Esc | Key::Char(' ') | Key::CtrlC => return Ok(()),
-                _ => {}
-            }
+        if let Some(Key::Enter | Key::Esc | Key::Char(' ') | Key::CtrlC) =
+            poll_key(handle, Duration::from_millis(100))
+        {
+            return Ok(());
         }
     }
 }

@@ -24,10 +24,13 @@ impl TtyUi {
 
 /// Determine which terminal device to open.
 fn tty_path(state: &PinentryState) -> String {
-    state
-        .ttyname
-        .clone()
-        .unwrap_or_else(|| "/dev/tty".to_string())
+    state.ttyname.clone().unwrap_or_else(|| {
+        if cfg!(windows) {
+            "CON".to_string()
+        } else {
+            "/dev/tty".to_string()
+        }
+    })
 }
 
 /// Open the terminal for both reading and writing.

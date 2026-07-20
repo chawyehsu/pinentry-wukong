@@ -23,7 +23,6 @@ keyring = { version = "3", features = [
     "sync-secret-service",
     "windows-native",
 ] }
-libc = "0.2"
 miette = { version = "7.6.0", features = ["fancy"] }
 ratatui = "0.29"
 rpassword = "7.5.4"
@@ -31,6 +30,9 @@ tokio = { version = "1.50.0", features = ["macros", "rt"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 zeroize = { version = "1.8", features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 assert_fs = "1.1.3"
