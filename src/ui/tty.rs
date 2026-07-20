@@ -22,31 +22,66 @@ impl TtyUi {
     }
 }
 
-/// Determine which terminal device to open.
+/// Determine which terminal device to open (Unix).
+#[cfg(unix)]
 fn tty_path(state: &PinentryState) -> String {
-    state.ttyname.clone().unwrap_or_else(|| {
-        if cfg!(windows) {
-            "CON".to_string()
-        } else {
-            "/dev/tty".to_string()
-        }
-    })
+    state
+        .ttyname
+        .clone()
+        .unwrap_or_else(|| "/dev/tty".to_string())
+}
+
+/// Console input device path on Windows.
+#[cfg(windows)]
+fn tty_in_path(state: &PinentryState) -> String {
+    state
+        .ttyname
+        .clone()
+        .unwrap_or_else(|| "CONIN$".to_string())
+}
+
+/// Console output device path on Windows.
+#[cfg(windows)]
+fn tty_out_path(state: &PinentryState) -> String {
+    // On Windows, output goes to CON (the active screen buffer).
+    // CONIN$ is input-only; CONOUT$ is output-only; CON is the active console.
+    state
+        .ttyname
+        .clone()
+        .unwrap_or_else(|| "CONOUT$".to_string())
 }
 
 /// Open the terminal for both reading and writing.
 fn open_tty(state: &PinentryState) -> miette::Result<(BufReader<File>, File)> {
-    let path = tty_path(state);
-    tracing::debug!("TTY: opening terminal: {path}");
-
-    let tty_in = OpenOptions::new()
-        .read(true)
-        .open(&path)
-        .into_diagnostic()?;
-    let tty_out = OpenOptions::new()
-        .write(true)
-        .open(&path)
-        .into_diagnostic()?;
-    Ok((BufReader::new(tty_in), tty_out))
+    #[cfg(unix)]
+    {
+        let path = tty_path(state);
+        tracing::debug!("TTY: opening terminal: {path}");
+        let tty_in = OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .into_diagnostic()?;
+        let tty_out = OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .into_diagnostic()?;
+        Ok((BufReader::new(tty_in), tty_out))
+    }
+    #[cfg(windows)]
+    {
+        let in_path = tty_in_path(state);
+        let out_path = tty_out_path(state);
+        tracing::debug!("TTY: opening console: in={in_path}, out={out_path}");
+        let tty_in = OpenOptions::new()
+            .read(true)
+            .open(&in_path)
+            .into_diagnostic()?;
+        let tty_out = OpenOptions::new()
+            .write(true)
+            .open(&out_path)
+            .into_diagnostic()?;
+        Ok((BufReader::new(tty_in), tty_out))
+    }
 }
 
 impl PinentryUi for TtyUi {
@@ -55,10 +90,14 @@ impl PinentryUi for TtyUi {
     }
 
     fn get_pin(&self, state: &PinentryState) -> miette::Result<GetPinResult> {
-        let path = tty_path(state);
+        #[cfg(unix)]
+        let out_path = tty_path(state);
+        #[cfg(windows)]
+        let out_path = tty_out_path(state);
+
         let mut writer = OpenOptions::new()
             .write(true)
-            .open(&path)
+            .open(&out_path)
             .into_diagnostic()?;
 
         if let Some(ref desc) = state.description {
@@ -75,10 +114,23 @@ impl PinentryUi for TtyUi {
 
         // Use rpassword with file path so it gets the fd and handles
         // echo disable/restore via termios (Unix) or SetConsoleMode (Windows).
-        let config = rpassword::ConfigBuilder::new()
-            .input_file_path(&path)
-            .output_file_path(&path)
-            .build();
+        #[cfg(unix)]
+        let config = {
+            let path = tty_path(state);
+            rpassword::ConfigBuilder::new()
+                .input_file_path(&path)
+                .output_file_path(&path)
+                .build()
+        };
+        #[cfg(windows)]
+        let config = {
+            let in_path = tty_in_path(state);
+            let out_path = tty_out_path(state);
+            rpassword::ConfigBuilder::new()
+                .input_file_path(&in_path)
+                .output_file_path(&out_path)
+                .build()
+        };
         let pin = rpassword::read_password_with_config(config).into_diagnostic()?;
 
         if pin.is_empty() {
