@@ -192,7 +192,7 @@ pub async fn start() -> miette::Result<()> {
             completions::execute(completions_args).await?;
         }
         Some(Command::Config(config_args)) => {
-            config::execute(config_args).await?;
+            config::execute(config_args, args.config.as_deref()).await?;
         }
         None => {
             serve::execute(args.serve, &cfg, keyring).await?;

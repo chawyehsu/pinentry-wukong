@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use clap::Parser;
@@ -28,8 +28,8 @@ pub enum ConfigCommand {
     Path,
 }
 
-pub async fn execute(args: Args) -> miette::Result<()> {
-    let config_path = config::resolve_config_path(None);
+pub async fn execute(args: Args, config_path: Option<&Path>) -> miette::Result<()> {
+    let config_path = config::resolve_config_path(config_path);
 
     match args.command {
         ConfigCommand::Edit => edit_config(&config_path)?,
