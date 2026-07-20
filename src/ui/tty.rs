@@ -60,7 +60,7 @@ fn open_console_handle(
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows_sys::Win32::System::Console::{
-        AttachConsole, GetConsoleMode, ATTACH_PARENT_PROCESS,
+        ATTACH_PARENT_PROCESS, AttachConsole, GetConsoleMode,
     };
 
     // Check if the std handle is a real console (not a pipe)
@@ -124,7 +124,7 @@ fn open_console_out() -> miette::Result<File> {
 fn read_password_windows() -> miette::Result<String> {
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::Console::{
-        GetConsoleMode, GetStdHandle, ReadConsoleW, SetConsoleMode, STD_INPUT_HANDLE,
+        GetConsoleMode, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, SetConsoleMode,
     };
 
     const ENABLE_ECHO_INPUT: u32 = 0x0004;
@@ -144,7 +144,9 @@ fn read_password_windows() -> miette::Result<String> {
     let new_mode =
         (original_mode | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT) & !ENABLE_ECHO_INPUT;
     if unsafe { SetConsoleMode(handle, new_mode) } == 0 {
-        return Err(miette::miette!("failed to disable echo (SetConsoleMode failed)"));
+        return Err(miette::miette!(
+            "failed to disable echo (SetConsoleMode failed)"
+        ));
     }
 
     // Read characters until Enter
@@ -270,8 +272,7 @@ impl PinentryUi for TtyUi {
         let cancel_label = &state.cancel;
         if state.notok.is_some() {
             let notok_label = state.notok.as_deref().unwrap_or("Not OK");
-            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ")
-                .into_diagnostic()?;
+            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ").into_diagnostic()?;
         } else {
             write!(writer, "[{ok_label}] [{cancel_label}]? ").into_diagnostic()?;
         }
