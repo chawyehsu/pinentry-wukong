@@ -60,17 +60,6 @@ pub enum Command {
     Config(config::Args),
 }
 
-/// Convert a `log::Level` to a tracing `LevelFilter`.
-fn log_level_to_tracing(level: log::Level) -> LevelFilter {
-    match level {
-        log::Level::Error => LevelFilter::ERROR,
-        log::Level::Warn => LevelFilter::WARN,
-        log::Level::Info => LevelFilter::INFO,
-        log::Level::Debug => LevelFilter::DEBUG,
-        log::Level::Trace => LevelFilter::TRACE,
-    }
-}
-
 /// Setup the global logger with the given level filter.
 ///
 /// Logs always go to a file at the resolved log path.
@@ -154,7 +143,10 @@ pub async fn start() -> miette::Result<()> {
     };
 
     // Handle --debug vs -v/-q conflict
+    // is_present() returns true only when the user explicitly passed -v/-q;
+    // log_level() alone returns Some(Error) by default in clap-verbosity-flag.
     if args.debug
+        && args.verbose.is_present()
         && let Some(cli_level) = args.verbose.log_level()
         && cli_level != log::Level::Debug
     {
@@ -165,17 +157,20 @@ pub async fn start() -> miette::Result<()> {
 
     // Resolve effective log level and whether logging is enabled
     let (level_filter, logging_enabled) = if args.debug {
+        // --debug flag explicitly enables debug logging
         (LevelFilter::DEBUG, true)
-    } else if let Some(cli_level) = args.verbose.log_level() {
-        // CLI verbosity flags implicitly enable logging
-        (log_level_to_tracing(cli_level), true)
+    } else if args.verbose.is_present() {
+        let cli_level = args.verbose.tracing_level_filter();
+        // any `-q` flag will set the level to OFF, which disables logging
+        let enabled = cli_level != LevelFilter::OFF;
+        (cli_level, enabled)
     } else {
         // Use config values
         let level = parse_level_filter(&cfg.logging.level);
         (level, cfg.logging.enabled)
     };
 
-    // Only set up logger if logging is enabled and level is not OFF
+    // Only set up logger if logging is enabled
     if logging_enabled && level_filter != LevelFilter::OFF {
         setup_logger(level_filter)?;
     }
