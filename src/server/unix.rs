@@ -1,7 +1,7 @@
 use std::io::{self, Read, Write};
 use std::os::unix::io::RawFd;
 
-use super::PinentryServer;
+use crate::server::pinentry::PinentryServer;
 
 /// Raw fd reader that reads directly from a file descriptor.
 /// This avoids holding `StdinLock`, which would block crossterm's event system.

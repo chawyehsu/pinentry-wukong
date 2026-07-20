@@ -1,6 +1,6 @@
 use std::io;
 
-use super::PinentryServer;
+use crate::server::pinentry::PinentryServer;
 
 /// Run the pinentry server on stdin/stdout.
 ///
