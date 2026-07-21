@@ -1,6 +1,14 @@
 use std::io::Write;
 
 use miette::IntoDiagnostic;
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
+use windows_sys::Win32::System::Console::{
+    AllocConsole, AttachConsole, FreeConsole, GetConsoleMode, GetStdHandle, ReadConsoleW,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode, WriteConsoleW,
+};
 
 use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
 
@@ -19,7 +27,7 @@ impl Drop for ConsoleSource {
         if let ConsoleSource::Ttyname { pid } = self {
             tracing::debug!("ConsoleSource: releasing ttyname console from PID {pid}");
             unsafe {
-                windows_sys::Win32::System::Console::FreeConsole();
+                FreeConsole();
             }
         }
     }
@@ -31,13 +39,13 @@ impl Drop for ConsoleSource {
 /// or owned (from CreateFileW — must be closed on drop).
 enum ConsoleHandle {
     /// Borrowed from GetStdHandle — do not close.
-    Borrowed(windows_sys::Win32::Foundation::HANDLE),
+    Borrowed(HANDLE),
     /// Owned — created via CreateFileW, must be closed.
-    Owned(windows_sys::Win32::Foundation::HANDLE),
+    Owned(HANDLE),
 }
 
 impl ConsoleHandle {
-    fn raw(&self) -> windows_sys::Win32::Foundation::HANDLE {
+    fn raw(&self) -> HANDLE {
         match self {
             ConsoleHandle::Borrowed(h) | ConsoleHandle::Owned(h) => *h,
         }
@@ -48,7 +56,7 @@ impl Drop for ConsoleHandle {
     fn drop(&mut self) {
         if let ConsoleHandle::Owned(h) = self {
             unsafe {
-                windows_sys::Win32::Foundation::CloseHandle(*h);
+                CloseHandle(*h);
             }
         }
     }
@@ -56,8 +64,6 @@ impl Drop for ConsoleHandle {
 
 impl Write for ConsoleHandle {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        use windows_sys::Win32::System::Console::WriteConsoleW;
-
         // Convert UTF-8 bytes to UTF-16 and write via WriteConsoleW.
         let text = std::str::from_utf8(buf)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -96,11 +102,6 @@ fn parse_conhost_pid(ttyname: &str) -> Option<u32> {
 /// 2. **Ttyname** — `OPTION ttyname` provides `/conhost/<pid>`, attach via `AttachConsole`
 /// 3. **Allocated** — `AllocConsole()` as last resort
 fn resolve_console_source(state: &PinentryState) -> miette::Result<ConsoleSource> {
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows_sys::Win32::System::Console::{
-        AttachConsole, FreeConsole, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE,
-    };
-
     // Step 1: Check if stdin is already a real console.
     let std_handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
     let mut mode: u32 = 0;
@@ -127,7 +128,6 @@ fn resolve_console_source(state: &PinentryState) -> miette::Result<ConsoleSource
     }
 
     // Step 3: Allocate a new console as last resort.
-    use windows_sys::Win32::System::Console::AllocConsole;
     unsafe { FreeConsole() };
     let allocated = unsafe { AllocConsole() };
     tracing::debug!("ConsoleSource: Allocated (AllocConsole returned {allocated})");
@@ -135,12 +135,7 @@ fn resolve_console_source(state: &PinentryState) -> miette::Result<ConsoleSource
 }
 
 /// Open a Windows console device. Returns `Some(handle)` on success.
-fn open_device(device: &str, access: u32) -> Option<windows_sys::Win32::Foundation::HANDLE> {
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    };
-
+fn open_device(device: &str, access: u32) -> Option<HANDLE> {
     let device_w: Vec<u16> = device.encode_utf16().chain(std::iter::once(0)).collect();
     let h = unsafe {
         CreateFileW(
@@ -166,8 +161,6 @@ fn open_console_handle(
     device: &str,
     access: u32,
 ) -> miette::Result<ConsoleHandle> {
-    use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
-
     match source {
         ConsoleSource::Direct => {
             let std_handle = match device {
@@ -195,11 +188,7 @@ fn resolve_console_handles(
 /// Read a line from a console handle (Windows).
 ///
 /// Uses ReadConsoleW to read wide characters until Enter.
-fn read_line_from_console(
-    handle: windows_sys::Win32::Foundation::HANDLE,
-) -> miette::Result<String> {
-    use windows_sys::Win32::System::Console::ReadConsoleW;
-
+fn read_line_from_console(handle: HANDLE) -> miette::Result<String> {
     let mut line = String::new();
     loop {
         let mut buf: [u16; 1] = [0];
@@ -235,9 +224,7 @@ fn read_line_from_console(
 ///
 /// Caller provides the console input handle (already opened).
 /// Console mode is restored before returning.
-fn read_password_windows(console_in: &ConsoleHandle) -> miette::Result<String> {
-    use windows_sys::Win32::System::Console::{GetConsoleMode, ReadConsoleW, SetConsoleMode};
-
+fn read_password(console_in: &ConsoleHandle) -> miette::Result<String> {
     const ENABLE_ECHO_INPUT: u32 = 0x0004;
     const ENABLE_LINE_INPUT: u32 = 0x0002;
     const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
@@ -322,7 +309,7 @@ pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
     write!(writer, "{prompt} ").into_diagnostic()?;
     writer.flush().into_diagnostic()?;
 
-    let pin = read_password_windows(&console_in)?;
+    let pin = read_password(&console_in)?;
 
     if pin.is_empty() {
         return Ok(GetPinResult::Closed);
