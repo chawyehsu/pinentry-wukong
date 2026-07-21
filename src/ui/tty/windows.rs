@@ -44,11 +44,96 @@ enum ConsoleHandle {
     Owned(HANDLE),
 }
 
+/// RAII guard that restores the original console mode on drop.
+struct ConsoleModeGuard {
+    handle: HANDLE,
+    original_mode: u32,
+}
+
+impl Drop for ConsoleModeGuard {
+    fn drop(&mut self) {
+        unsafe {
+            SetConsoleMode(self.handle, self.original_mode);
+        }
+    }
+}
+
 impl ConsoleHandle {
     fn raw(&self) -> HANDLE {
         match self {
             ConsoleHandle::Borrowed(h) | ConsoleHandle::Owned(h) => *h,
         }
+    }
+
+    /// Change the console mode, returning a guard that restores the original on drop.
+    fn set_mode(&self, mode: u32) -> miette::Result<ConsoleModeGuard> {
+        let handle = self.raw();
+        let mut original_mode: u32 = 0;
+        if unsafe { GetConsoleMode(handle, &mut original_mode) } == 0 {
+            return Err(miette::miette!("GetConsoleMode failed on console handle"));
+        }
+        if unsafe { SetConsoleMode(handle, mode) } == 0 {
+            return Err(miette::miette!("SetConsoleMode failed"));
+        }
+        Ok(ConsoleModeGuard {
+            handle,
+            original_mode,
+        })
+    }
+
+    /// Read a line from the console, handling backspace. Reads until Enter.
+    fn read_line(&self) -> miette::Result<String> {
+        let bytes = self.read_line_bytes()?;
+        String::from_utf8(bytes)
+            .map_err(|e| miette::miette!("console input was not valid UTF-8: {e}"))
+    }
+
+    /// Read a line into raw bytes, handling backspace. Reads until Enter.
+    ///
+    /// Returns `SecretBytes` so the buffer is zeroed on drop.
+    fn read_line_bytes(&self) -> miette::Result<Vec<u8>> {
+        let handle = self.raw();
+        let mut buf = Vec::new();
+        loop {
+            let mut wide: [u16; 1] = [0];
+            let mut chars_read: u32 = 0;
+            if unsafe {
+                ReadConsoleW(
+                    handle,
+                    wide.as_mut_ptr() as *mut _,
+                    1,
+                    &mut chars_read,
+                    std::ptr::null(),
+                )
+            } == 0
+            {
+                return Err(miette::miette!("ReadConsoleW failed"));
+            }
+            if chars_read == 0 {
+                break;
+            }
+            match wide[0] {
+                0x000D | 0x000A => break,
+                0x0008 | 0x007F => {
+                    // Backspace: remove last UTF-8 byte sequence
+                    if !buf.is_empty() {
+                        // Walk back to find start of last char
+                        let mut i = buf.len() - 1;
+                        while i > 0 && (buf[i] & 0xC0) == 0x80 {
+                            i -= 1;
+                        }
+                        buf.truncate(i);
+                    }
+                }
+                c => {
+                    if let Some(ch) = char::from_u32(c as u32) {
+                        let mut tmp = [0u8; 4];
+                        buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
+                    }
+                }
+            }
+        }
+        Ok(buf)
     }
 }
 
@@ -178,126 +263,33 @@ fn open_console_handle(
 /// Resolve console source and open both CONIN$ and CONOUT$ handles.
 fn resolve_console_handles(
     state: &PinentryState,
-) -> miette::Result<(ConsoleSource, ConsoleHandle, ConsoleHandle)> {
+) -> miette::Result<(ConsoleHandle, ConsoleHandle)> {
     let source = resolve_console_source(state)?;
     let writer = open_console_handle(&source, "CONOUT$", 0x40000000)?;
     let reader = open_console_handle(&source, "CONIN$", 0xC0000000)?;
-    Ok((source, writer, reader))
+    Ok((writer, reader))
 }
 
-/// Read a line from a console handle (Windows).
-///
-/// Uses ReadConsoleW to read wide characters until Enter.
-fn read_line_from_console(handle: HANDLE) -> miette::Result<String> {
-    let mut line = String::new();
-    loop {
-        let mut buf: [u16; 1] = [0];
-        let mut chars_read: u32 = 0;
-        if unsafe {
-            ReadConsoleW(
-                handle,
-                buf.as_mut_ptr() as *mut _,
-                1,
-                &mut chars_read,
-                std::ptr::null(),
-            )
-        } == 0
-        {
-            return Err(miette::miette!("ReadConsoleW failed"));
-        }
-        if chars_read == 0 {
-            break;
-        }
-        match buf[0] {
-            0x000D | 0x000A => break,
-            c => {
-                if let Some(ch) = char::from_u32(c as u32) {
-                    line.push(ch);
-                }
-            }
-        }
-    }
-    Ok(line)
-}
-
-/// Read a password from a Windows console handle with echo disabled.
-///
-/// Caller provides the console input handle (already opened).
-/// Console mode is restored before returning.
-fn read_password(console_in: &ConsoleHandle) -> miette::Result<String> {
-    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+/// Read a password with echo disabled. Returns `SecretBytes` (zeroed on drop).
+fn read_password(reader: &ConsoleHandle) -> miette::Result<SecretBytes> {
     const ENABLE_LINE_INPUT: u32 = 0x0002;
     const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
 
-    let handle = console_in.raw();
+    let new_mode = ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT;
 
-    // Save original console mode
-    let mut original_mode: u32 = 0;
-    if unsafe { GetConsoleMode(handle, &mut original_mode) } == 0 {
-        return Err(miette::miette!("GetConsoleMode failed on console handle"));
-    }
-
-    // Disable echo, keep line input and processed input
-    let new_mode =
-        (original_mode | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT) & !ENABLE_ECHO_INPUT;
-    if unsafe { SetConsoleMode(handle, new_mode) } == 0 {
-        return Err(miette::miette!(
-            "failed to disable echo (SetConsoleMode failed)"
-        ));
-    }
-
-    // Read characters until Enter
-    let mut password = String::new();
-    let result = (|| -> miette::Result<()> {
-        loop {
-            let mut buf: [u16; 1] = [0];
-            let mut chars_read: u32 = 0;
-            if unsafe {
-                ReadConsoleW(
-                    handle,
-                    buf.as_mut_ptr() as *mut _,
-                    1,
-                    &mut chars_read,
-                    std::ptr::null(),
-                )
-            } == 0
-            {
-                return Err(miette::miette!("ReadConsoleW failed"));
-            }
-            if chars_read == 0 {
-                break;
-            }
-            match buf[0] {
-                0x000D | 0x000A => break,
-                0x0008 | 0x007F => {
-                    password.pop();
-                }
-                c => {
-                    if let Some(ch) = char::from_u32(c as u32) {
-                        password.push(ch);
-                    }
-                }
-            }
-        }
-        Ok(())
-    })();
-
-    // Always restore original mode (before console is dropped/closed)
-    unsafe {
-        SetConsoleMode(handle, original_mode);
-    }
-    // console is dropped here — Owned handle is closed automatically
-
-    result?;
+    let secret = {
+        let _guard = reader.set_mode(new_mode)?;
+        SecretBytes::from(reader.read_line_bytes()?)
+    };
 
     // Write a newline since echo was disabled
     let _ = writeln!(std::io::stdout());
 
-    Ok(password)
+    Ok(secret)
 }
 
 pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
-    let (_source, mut writer, console_in) = resolve_console_handles(state)?;
+    let (mut writer, reader) = resolve_console_handles(state)?;
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").into_diagnostic()?;
@@ -309,16 +301,16 @@ pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
     write!(writer, "{prompt} ").into_diagnostic()?;
     writer.flush().into_diagnostic()?;
 
-    let pin = read_password(&console_in)?;
+    let pin = read_password(&reader)?;
 
     if pin.is_empty() {
         return Ok(GetPinResult::Closed);
     }
-    Ok(GetPinResult::Pin(SecretBytes::from(pin.into_bytes())))
+    Ok(GetPinResult::Pin(pin))
 }
 
 pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
-    let (_source, mut writer, console_in) = resolve_console_handles(state)?;
+    let (mut writer, reader) = resolve_console_handles(state)?;
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").into_diagnostic()?;
@@ -337,7 +329,7 @@ pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
     }
     writer.flush().into_diagnostic()?;
 
-    let line = read_line_from_console(console_in.raw())?;
+    let line = reader.read_line()?;
 
     let input = line.trim().to_lowercase();
     match input.as_str() {
@@ -354,7 +346,7 @@ pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
 }
 
 pub(super) fn message(state: &PinentryState) -> miette::Result<()> {
-    let (_source, mut writer, console_in) = resolve_console_handles(state)?;
+    let (mut writer, reader) = resolve_console_handles(state)?;
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").into_diagnostic()?;
@@ -362,7 +354,7 @@ pub(super) fn message(state: &PinentryState) -> miette::Result<()> {
     write!(writer, "[OK] ").into_diagnostic()?;
     writer.flush().into_diagnostic()?;
 
-    read_line_from_console(console_in.raw())?;
+    reader.read_line()?;
     Ok(())
 }
 
