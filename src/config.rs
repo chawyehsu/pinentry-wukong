@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 const VALID_LEVELS: &[&str] = &["OFF", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"];
 
 /// Valid UI modes for config.
-const VALID_UI_MODES: &[&str] = &["auto", "tty", "tui", "prefer-tty", "prefer-gui"];
+const VALID_UI_MODES: &[&str] = &["auto", "tty", "tui"];
 
 /// Default config file template shown by `config edit` and `config list`.
 pub const DEFAULT_TEMPLATE: &str = r#"[logging]

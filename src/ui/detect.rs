@@ -9,10 +9,6 @@ pub enum UiMode {
     Tty,
     /// Auto-detect based on terminal capabilities
     Auto,
-    /// Prefer TTY, fall back to TUI
-    PreferTty,
-    /// Prefer GUI, fall back to TUI then TTY
-    PreferGui,
 }
 
 impl fmt::Display for UiMode {
@@ -21,8 +17,6 @@ impl fmt::Display for UiMode {
             UiMode::Tui => write!(f, "tui"),
             UiMode::Tty => write!(f, "tty"),
             UiMode::Auto => write!(f, "auto"),
-            UiMode::PreferTty => write!(f, "prefer-tty"),
-            UiMode::PreferGui => write!(f, "prefer-gui"),
         }
     }
 }
@@ -35,11 +29,7 @@ impl std::str::FromStr for UiMode {
             "tui" => Ok(UiMode::Tui),
             "tty" => Ok(UiMode::Tty),
             "auto" => Ok(UiMode::Auto),
-            "prefer-tty" => Ok(UiMode::PreferTty),
-            "prefer-gui" => Ok(UiMode::PreferGui),
-            _ => Err(format!(
-                "unknown UI mode: {s} (valid: auto, tty, tui, prefer-tty, prefer-gui)"
-            )),
+            _ => Err(format!("unknown UI mode: {s} (valid: auto, tty, tui)")),
         }
     }
 }
@@ -54,17 +44,6 @@ impl UiMode {
         match self {
             UiMode::Tui | UiMode::Tty => self,
             UiMode::Auto => detect_ui_mode(),
-            UiMode::PreferTty => {
-                // Prefer TTY if TERM is dumb or unset, otherwise TUI
-                match detect_ui_mode() {
-                    UiMode::Tty => UiMode::Tty,
-                    _ => UiMode::Tui,
-                }
-            }
-            UiMode::PreferGui => {
-                // GUI not yet supported, fall through to terminal detection
-                detect_ui_mode()
-            }
         }
     }
 
