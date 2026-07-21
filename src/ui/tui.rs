@@ -350,7 +350,7 @@ fn run_getpin(
     tty_fd: RawFd,
     state: &PinentryState,
 ) -> miette::Result<GetPinResult> {
-    let title = state.title.as_deref().unwrap_or("pinentry-wukong");
+    let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
     let description = state.description.as_deref().unwrap_or("");
     let prompt = &state.prompt;
     let error = state.error.as_deref();
@@ -527,7 +527,7 @@ fn run_confirm(
     tty_fd: RawFd,
     state: &PinentryState,
 ) -> miette::Result<ConfirmResult> {
-    let title = state.title.as_deref().unwrap_or("pinentry-wukong");
+    let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
     let description = state.description.as_deref().unwrap_or("");
     let error = state.error.as_deref();
     let ok_label = &state.ok;
@@ -652,7 +652,7 @@ fn run_message(
     tty_fd: RawFd,
     state: &PinentryState,
 ) -> miette::Result<()> {
-    let title = state.title.as_deref().unwrap_or("pinentry-wukong");
+    let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
     let description = state.description.as_deref().unwrap_or("");
     let ok_label = &state.ok;
 

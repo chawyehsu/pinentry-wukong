@@ -8,7 +8,7 @@ use miette::IntoDiagnostic;
 
 use crate::config::{self, Config, DEFAULT_TEMPLATE};
 
-/// Manage pinentry-wukong configuration
+/// Manage configuration
 #[derive(Parser, Debug)]
 #[clap(subcommand_required = true)]
 pub struct Args {
