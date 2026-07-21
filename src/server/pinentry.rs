@@ -285,9 +285,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
     }
 
     fn handle_confirm(&mut self, ui: &dyn PinentryUi, one_button: bool) -> Result<(), Error> {
-        if one_button {
-            self.state.one_button = true;
-        }
+        self.state.one_button = one_button;
 
         let result = ui
             .confirm(&self.state)
