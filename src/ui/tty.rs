@@ -52,8 +52,8 @@ fn open_tty(state: &PinentryState) -> miette::Result<(BufReader<File>, File)> {
 enum ConsoleSource {
     /// stdin is already a real console (`GetConsoleMode` succeeds).
     Direct,
-    /// Attached to an ancestor process's console via process-tree walk.
-    Inherited { pid: u32 },
+    /// `OPTION ttyname` provided `/conhost/<pid>` — attached via `AttachConsole`.
+    Ttyname { pid: u32 },
     /// `AllocConsole()` created a new console window (last resort).
     Allocated,
 }
@@ -61,8 +61,8 @@ enum ConsoleSource {
 #[cfg(windows)]
 impl Drop for ConsoleSource {
     fn drop(&mut self) {
-        if let ConsoleSource::Inherited { pid } = self {
-            tracing::debug!("ConsoleSource: releasing inherited console from PID {pid}");
+        if let ConsoleSource::Ttyname { pid } = self {
+            tracing::debug!("ConsoleSource: releasing ttyname console from PID {pid}");
             unsafe {
                 windows_sys::Win32::System::Console::FreeConsole();
             }
@@ -132,20 +132,25 @@ impl Write for ConsoleHandle {
     }
 }
 
+/// Parse a `/conhost/<pid>` ttyname value, returning the PID if valid.
+#[cfg(windows)]
+fn parse_conhost_pid(ttyname: &str) -> Option<u32> {
+    let pid_str = ttyname.strip_prefix("/conhost/")?;
+    pid_str.parse::<u32>().ok().filter(|&pid| pid != 0)
+}
+
 /// Resolve which Windows console to use.
 ///
 /// Three-tier fallback:
 /// 1. **Direct** — stdin is already a real console (`GetConsoleMode` succeeds)
-/// 2. **Inherited** — walk the process tree to find an ancestor with a console
+/// 2. **Ttyname** — `OPTION ttyname` provides `/conhost/<pid>`, attach via `AttachConsole`
 /// 3. **Allocated** — `AllocConsole()` as last resort
 #[cfg(windows)]
-fn resolve_console_source() -> miette::Result<ConsoleSource> {
+fn resolve_console_source(state: &PinentryState) -> miette::Result<ConsoleSource> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::Console::{
         AttachConsole, FreeConsole, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE,
     };
-
-    const MAX_ANCESTOR_DEPTH: u32 = 10;
 
     // Step 1: Check if stdin is already a real console.
     let std_handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
@@ -158,37 +163,18 @@ fn resolve_console_source() -> miette::Result<ConsoleSource> {
         return Ok(ConsoleSource::Direct);
     }
 
-    // Step 2: Walk the process tree to find an ancestor with a console.
-    // Use NtQueryInformationProcess to get the parent PID at each level.
-    let mut current_pid = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() };
-    for depth in 0..MAX_ANCESTOR_DEPTH {
-        let parent_pid = match get_parent_pid(current_pid) {
-            Some(pid) if pid != 0 => pid,
-            _ => {
-                tracing::debug!("ConsoleSource: no more ancestors at depth {depth}");
-                break;
-            }
-        };
-
-        tracing::debug!("ConsoleSource: trying ancestor PID {parent_pid} at depth {depth}");
-
-        // Detach from any current console before attaching to the ancestor.
+    // Step 2: Check if OPTION ttyname provides a /conhost/<pid>.
+    if let Some(ref ttyname) = state.ttyname
+        && let Some(pid) = parse_conhost_pid(ttyname)
+    {
+        tracing::debug!("ConsoleSource: trying ttyname attach to PID {pid}");
         unsafe { FreeConsole() };
-        let attached = unsafe { AttachConsole(parent_pid) };
-        if attached == 0 {
-            tracing::debug!("ConsoleSource: AttachConsole({parent_pid}) failed, skipping");
-            current_pid = parent_pid;
-            continue;
+        let attached = unsafe { AttachConsole(pid) };
+        if attached != 0 {
+            tracing::debug!("ConsoleSource: Ttyname (attached to PID {pid})");
+            return Ok(ConsoleSource::Ttyname { pid });
         }
-
-        // Verify we can actually open a console device.
-        let test = open_device("CONIN$", 0xC0000000);
-        if test.is_some() {
-            tracing::debug!("ConsoleSource: Inherited from PID {parent_pid} at depth {depth}");
-            return Ok(ConsoleSource::Inherited { pid: parent_pid });
-        }
-
-        current_pid = parent_pid;
+        tracing::debug!("ConsoleSource: AttachConsole({pid}) failed, falling through");
     }
 
     // Step 3: Allocate a new console as last resort.
@@ -199,42 +185,7 @@ fn resolve_console_source() -> miette::Result<ConsoleSource> {
     Ok(ConsoleSource::Allocated)
 }
 
-/// Get the parent PID of a process via `NtQueryInformationProcess`.
-#[cfg(windows)]
-fn get_parent_pid(pid: u32) -> Option<u32> {
-    use windows_sys::Wdk::System::Threading::NtQueryInformationProcess;
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_BASIC_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-
-    // Open the target process.
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
-        return None;
-    }
-
-    let mut pbi: PROCESS_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
-    let mut return_len: u32 = 0;
-    let status = unsafe {
-        NtQueryInformationProcess(
-            handle,
-            0, // ProcessBasicInformation
-            &mut pbi as *mut _ as *mut _,
-            std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
-            &mut return_len,
-        )
-    };
-    unsafe { CloseHandle(handle) };
-
-    if status != 0 {
-        return None;
-    }
-
-    Some(pbi.InheritedFromUniqueProcessId as u32)
-}
-
-/// Try to open a Windows console device. Returns `Some(handle)` on success.
+/// Open a Windows console device. Returns `Some(handle)` on success.
 #[cfg(windows)]
 fn open_device(device: &str, access: u32) -> Option<windows_sys::Win32::Foundation::HANDLE> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
@@ -278,7 +229,7 @@ fn open_console_handle(
             };
             Ok(ConsoleHandle::Borrowed(std_handle))
         }
-        ConsoleSource::Inherited { .. } | ConsoleSource::Allocated => open_device(device, access)
+        ConsoleSource::Ttyname { .. } | ConsoleSource::Allocated => open_device(device, access)
             .map(ConsoleHandle::Owned)
             .ok_or_else(|| miette::miette!("failed to open {device}")),
     }
@@ -286,8 +237,10 @@ fn open_console_handle(
 
 /// Resolve console source and open both CONIN$ and CONOUT$ handles.
 #[cfg(windows)]
-fn resolve_console_handles() -> miette::Result<(ConsoleSource, ConsoleHandle, ConsoleHandle)> {
-    let source = resolve_console_source()?;
+fn resolve_console_handles(
+    state: &PinentryState,
+) -> miette::Result<(ConsoleSource, ConsoleHandle, ConsoleHandle)> {
+    let source = resolve_console_source(state)?;
     let writer = open_console_handle(&source, "CONOUT$", 0x40000000)?;
     let reader = open_console_handle(&source, "CONIN$", 0xC0000000)?;
     Ok((source, writer, reader))
@@ -429,10 +382,7 @@ impl PinentryUi for TtyUi {
                 .into_diagnostic()?
         };
         #[cfg(windows)]
-        let (mut writer, console_in) = {
-            let (_source, w, r) = resolve_console_handles()?;
-            (w, r)
-        };
+        let (_source, mut writer, console_in) = resolve_console_handles(state)?;
 
         if let Some(ref desc) = state.description {
             writeln!(writer, "{desc}").into_diagnostic()?;
@@ -466,10 +416,7 @@ impl PinentryUi for TtyUi {
         #[cfg(unix)]
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
-        let (mut writer, console_in) = {
-            let (_source, w, r) = resolve_console_handles()?;
-            (w, r)
-        };
+        let (_source, mut writer, console_in) = resolve_console_handles(state)?;
 
         if let Some(ref desc) = state.description {
             writeln!(writer, "{desc}").into_diagnostic()?;
@@ -515,10 +462,7 @@ impl PinentryUi for TtyUi {
         #[cfg(unix)]
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
-        let (mut writer, console_in) = {
-            let (_source, w, r) = resolve_console_handles()?;
-            (w, r)
-        };
+        let (_source, mut writer, console_in) = resolve_console_handles(state)?;
 
         if let Some(ref desc) = state.description {
             writeln!(writer, "{desc}").into_diagnostic()?;
