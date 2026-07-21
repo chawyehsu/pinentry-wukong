@@ -28,11 +28,20 @@ enum ConsoleSource {
 
 impl Drop for ConsoleSource {
     fn drop(&mut self) {
-        if let ConsoleSource::Ttyname { pid } = self {
-            tracing::debug!("ConsoleSource: releasing ttyname console from PID {pid}");
-            unsafe {
-                FreeConsole();
+        match self {
+            ConsoleSource::Ttyname { pid } => {
+                tracing::debug!("ConsoleSource: releasing ttyname console from PID {pid}");
+                unsafe {
+                    FreeConsole();
+                }
             }
+            ConsoleSource::Allocated => {
+                tracing::debug!("ConsoleSource: releasing allocated console");
+                unsafe {
+                    FreeConsole();
+                }
+            }
+            ConsoleSource::Direct => {}
         }
     }
 }
