@@ -1,9 +1,10 @@
 use clap::Parser;
 
+use crate::config::Config;
 use crate::keychain::Keychain;
 use crate::keychain::keyring::KeyringKeychain;
 use crate::server;
-use crate::ui::detect::{self, UiMode};
+use crate::ui::detect::UiMode;
 
 /// Run the pinentry server
 ///
@@ -11,10 +12,6 @@ use crate::ui::detect::{self, UiMode};
 /// Typically invoked by gpg-agent as a subprocess.
 #[derive(Parser, Debug, Default)]
 pub struct Args {
-    /// Turn on debugging output
-    #[arg(short, long)]
-    pub debug: bool,
-
     /// X display name (ignored on non-X11)
     #[arg(short = 'D', long, value_name = "DISPLAY")]
     pub display: Option<String>,
@@ -46,27 +43,34 @@ pub struct Args {
     /// Force a specific UI mode
     #[arg(long, value_name = "MODE")]
     pub ui: Option<UiMode>,
-
-    /// Disable keychain integration
-    #[arg(long)]
-    pub no_keychain: bool,
 }
 
-pub async fn execute(args: Args) -> miette::Result<()> {
-    let ui_mode = args.ui.unwrap_or_else(detect::detect_ui_mode);
+pub async fn execute(args: Args, cfg: &Config, keyring: bool) -> miette::Result<()> {
+    // Resolve UI mode: CLI arg > config > auto-detect
+    let ui_mode = match args.ui {
+        Some(mode) => mode,
+        None => match cfg.general.ui.as_deref() {
+            Some(mode_str) => mode_str.parse::<UiMode>().unwrap_or(UiMode::Auto),
+            None => UiMode::Auto,
+        },
+    };
+    let ui_mode = ui_mode.resolve();
     tracing::info!("using UI mode: {ui_mode}");
 
     // Set up keychain
-    let keychain: Option<Box<dyn Keychain>> = if args.no_keychain {
-        tracing::info!("keychain disabled");
+    let keychain: Option<Box<dyn Keychain>> = if !keyring {
+        tracing::info!("keyring disabled");
         None
     } else {
-        tracing::info!("keychain enabled (OS credential store)");
+        tracing::info!("keyring enabled (OS credential store)");
         Some(Box::new(KeyringKeychain::new()))
     };
 
     let grab = !args.no_global_grab;
-    let timeout = args.timeout.unwrap_or(60);
+
+    // Resolve timeout: CLI arg > config > hardcoded default (60)
+    let timeout = args.timeout.or(cfg.general.timeout).unwrap_or(60);
+
     let ui = ui_mode.create_ui();
 
     server::start(&*ui, grab, timeout, keychain)?;
