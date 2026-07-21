@@ -232,8 +232,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
             GetPinResult::Pin(secret) => {
                 if !secret.is_empty() {
                     tracing::debug!(
-                        "GETPIN: passphrase entered ({} bytes), cache_allowed={}, keyinfo={:?}, may_cache={}",
-                        secret.len(),
+                        "GETPIN: passphrase entered, cache_allowed={}, keyinfo={:?}, may_cache={}",
                         self.state.allow_external_password_cache,
                         self.state.keyinfo,
                         self.state.may_cache_password
@@ -265,7 +264,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
                         );
                     }
 
-                    tracing::debug!("GETPIN: sending D line ({} bytes)", secret.len());
+                    tracing::debug!("GETPIN: sending D line");
                     self.send(Response::data(secret.as_bytes().to_vec()))?;
                 }
                 tracing::debug!("GETPIN: sending OK");

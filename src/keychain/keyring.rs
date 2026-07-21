@@ -35,13 +35,8 @@ impl Keychain for KeyringKeychain {
         };
         match entry.get_password() {
             Ok(password) => {
-                let bytes = password.into_bytes();
-                tracing::info!(
-                    "keychain hit: account={keygrip}, len={}, utf8={}",
-                    bytes.len(),
-                    std::str::from_utf8(&bytes).is_ok()
-                );
-                Some(SecretBytes::from(bytes))
+                tracing::info!("keychain hit: account={keygrip}");
+                Some(SecretBytes::from(password.into_bytes()))
             }
             Err(keyring::Error::NoEntry) => {
                 tracing::debug!("keychain miss: no entry for {keygrip}");
