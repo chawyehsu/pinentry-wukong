@@ -1,54 +1,10 @@
-#[cfg(unix)]
-use std::fs::{File, OpenOptions};
-#[cfg(unix)]
-use std::io::BufRead;
-#[cfg(unix)]
-use std::io::BufReader;
 use std::io::Write;
 
 use miette::IntoDiagnostic;
 
 use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
-use crate::ui::PinentryUi;
-
-/// Simple line-based TTY fallback UI.
-pub struct TtyUi;
-
-impl TtyUi {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-// ── Unix helpers ──────────────────────────────────────────────────────────────
-
-#[cfg(unix)]
-fn tty_path(state: &PinentryState) -> String {
-    state
-        .ttyname
-        .clone()
-        .unwrap_or_else(|| "/dev/tty".to_string())
-}
-
-#[cfg(unix)]
-fn open_tty(state: &PinentryState) -> miette::Result<(BufReader<File>, File)> {
-    let path = tty_path(state);
-    tracing::debug!("TTY: opening terminal: {path}");
-    let tty_in = OpenOptions::new()
-        .read(true)
-        .open(&path)
-        .into_diagnostic()?;
-    let tty_out = OpenOptions::new()
-        .write(true)
-        .open(&path)
-        .into_diagnostic()?;
-    Ok((BufReader::new(tty_in), tty_out))
-}
-
-// ── Windows helpers ───────────────────────────────────────────────────────────
 
 /// How the Windows console was obtained.
-#[cfg(windows)]
 enum ConsoleSource {
     /// stdin is already a real console (`GetConsoleMode` succeeds).
     Direct,
@@ -58,7 +14,6 @@ enum ConsoleSource {
     Allocated,
 }
 
-#[cfg(windows)]
 impl Drop for ConsoleSource {
     fn drop(&mut self) {
         if let ConsoleSource::Ttyname { pid } = self {
@@ -74,7 +29,6 @@ impl Drop for ConsoleSource {
 ///
 /// Tracks whether the handle is borrowed (std handle — must NOT be closed)
 /// or owned (from CreateFileW — must be closed on drop).
-#[cfg(windows)]
 enum ConsoleHandle {
     /// Borrowed from GetStdHandle — do not close.
     Borrowed(windows_sys::Win32::Foundation::HANDLE),
@@ -82,7 +36,6 @@ enum ConsoleHandle {
     Owned(windows_sys::Win32::Foundation::HANDLE),
 }
 
-#[cfg(windows)]
 impl ConsoleHandle {
     fn raw(&self) -> windows_sys::Win32::Foundation::HANDLE {
         match self {
@@ -91,7 +44,6 @@ impl ConsoleHandle {
     }
 }
 
-#[cfg(windows)]
 impl Drop for ConsoleHandle {
     fn drop(&mut self) {
         if let ConsoleHandle::Owned(h) = self {
@@ -102,7 +54,6 @@ impl Drop for ConsoleHandle {
     }
 }
 
-#[cfg(windows)]
 impl Write for ConsoleHandle {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         use windows_sys::Win32::System::Console::WriteConsoleW;
@@ -133,7 +84,6 @@ impl Write for ConsoleHandle {
 }
 
 /// Parse a `/conhost/<pid>` ttyname value, returning the PID if valid.
-#[cfg(windows)]
 fn parse_conhost_pid(ttyname: &str) -> Option<u32> {
     let pid_str = ttyname.strip_prefix("/conhost/")?;
     pid_str.parse::<u32>().ok().filter(|&pid| pid != 0)
@@ -145,7 +95,6 @@ fn parse_conhost_pid(ttyname: &str) -> Option<u32> {
 /// 1. **Direct** — stdin is already a real console (`GetConsoleMode` succeeds)
 /// 2. **Ttyname** — `OPTION ttyname` provides `/conhost/<pid>`, attach via `AttachConsole`
 /// 3. **Allocated** — `AllocConsole()` as last resort
-#[cfg(windows)]
 fn resolve_console_source(state: &PinentryState) -> miette::Result<ConsoleSource> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::Console::{
@@ -186,7 +135,6 @@ fn resolve_console_source(state: &PinentryState) -> miette::Result<ConsoleSource
 }
 
 /// Open a Windows console device. Returns `Some(handle)` on success.
-#[cfg(windows)]
 fn open_device(device: &str, access: u32) -> Option<windows_sys::Win32::Foundation::HANDLE> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::{
@@ -213,7 +161,6 @@ fn open_device(device: &str, access: u32) -> Option<windows_sys::Win32::Foundati
 }
 
 /// Open a console handle from a resolved `ConsoleSource`.
-#[cfg(windows)]
 fn open_console_handle(
     source: &ConsoleSource,
     device: &str,
@@ -236,7 +183,6 @@ fn open_console_handle(
 }
 
 /// Resolve console source and open both CONIN$ and CONOUT$ handles.
-#[cfg(windows)]
 fn resolve_console_handles(
     state: &PinentryState,
 ) -> miette::Result<(ConsoleSource, ConsoleHandle, ConsoleHandle)> {
@@ -249,7 +195,6 @@ fn resolve_console_handles(
 /// Read a line from a console handle (Windows).
 ///
 /// Uses ReadConsoleW to read wide characters until Enter.
-#[cfg(windows)]
 fn read_line_from_console(
     handle: windows_sys::Win32::Foundation::HANDLE,
 ) -> miette::Result<String> {
@@ -290,7 +235,6 @@ fn read_line_from_console(
 ///
 /// Caller provides the console input handle (already opened).
 /// Console mode is restored before returning.
-#[cfg(windows)]
 fn read_password_windows(console_in: &ConsoleHandle) -> miette::Result<String> {
     use windows_sys::Win32::System::Console::{GetConsoleMode, ReadConsoleW, SetConsoleMode};
 
@@ -365,184 +309,125 @@ fn read_password_windows(console_in: &ConsoleHandle) -> miette::Result<String> {
     Ok(password)
 }
 
-// ── PinentryUi impl ──────────────────────────────────────────────────────────
+pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
+    let (_source, mut writer, console_in) = resolve_console_handles(state)?;
 
-impl PinentryUi for TtyUi {
-    fn flavor(&self) -> &str {
-        "wukong:tty"
+    if let Some(ref desc) = state.description {
+        writeln!(writer, "{desc}").into_diagnostic()?;
+    }
+    if let Some(ref err) = state.error {
+        writeln!(writer, "ERROR: {err}").into_diagnostic()?;
+    }
+    let prompt = &state.prompt;
+    write!(writer, "{prompt} ").into_diagnostic()?;
+    writer.flush().into_diagnostic()?;
+
+    let pin = read_password_windows(&console_in)?;
+
+    if pin.is_empty() {
+        return Ok(GetPinResult::Closed);
+    }
+    Ok(GetPinResult::Pin(SecretBytes::from(pin.into_bytes())))
+}
+
+pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
+    let (_source, mut writer, console_in) = resolve_console_handles(state)?;
+
+    if let Some(ref desc) = state.description {
+        writeln!(writer, "{desc}").into_diagnostic()?;
+    }
+    if let Some(ref err) = state.error {
+        writeln!(writer, "ERROR: {err}").into_diagnostic()?;
     }
 
-    fn get_pin(&self, state: &PinentryState) -> miette::Result<GetPinResult> {
-        #[cfg(unix)]
-        let mut writer = {
-            let path = tty_path(state);
-            OpenOptions::new()
-                .write(true)
-                .open(&path)
-                .into_diagnostic()?
-        };
-        #[cfg(windows)]
-        let (_source, mut writer, console_in) = resolve_console_handles(state)?;
-
-        if let Some(ref desc) = state.description {
-            writeln!(writer, "{desc}").into_diagnostic()?;
-        }
-        if let Some(ref err) = state.error {
-            writeln!(writer, "ERROR: {err}").into_diagnostic()?;
-        }
-        let prompt = &state.prompt;
-        write!(writer, "{prompt} ").into_diagnostic()?;
-        writer.flush().into_diagnostic()?;
-
-        #[cfg(unix)]
-        let pin = {
-            let path = tty_path(state);
-            let config = rpassword::ConfigBuilder::new()
-                .input_file_path(&path)
-                .output_file_path(&path)
-                .build();
-            rpassword::read_password_with_config(config).into_diagnostic()?
-        };
-        #[cfg(windows)]
-        let pin = read_password_windows(&console_in)?;
-
-        if pin.is_empty() {
-            return Ok(GetPinResult::Closed);
-        }
-        Ok(GetPinResult::Pin(SecretBytes::from(pin.into_bytes())))
+    let ok_label = &state.ok;
+    let cancel_label = &state.cancel;
+    if state.notok.is_some() {
+        let notok_label = state.notok.as_deref().unwrap_or("Not OK");
+        write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ").into_diagnostic()?;
+    } else {
+        write!(writer, "[{ok_label}] [{cancel_label}]? ").into_diagnostic()?;
     }
+    writer.flush().into_diagnostic()?;
 
-    fn confirm(&self, state: &PinentryState) -> miette::Result<ConfirmResult> {
-        #[cfg(unix)]
-        let (mut reader, mut writer) = open_tty(state)?;
-        #[cfg(windows)]
-        let (_source, mut writer, console_in) = resolve_console_handles(state)?;
+    let line = read_line_from_console(console_in.raw())?;
 
-        if let Some(ref desc) = state.description {
-            writeln!(writer, "{desc}").into_diagnostic()?;
-        }
-        if let Some(ref err) = state.error {
-            writeln!(writer, "ERROR: {err}").into_diagnostic()?;
-        }
-
-        let ok_label = &state.ok;
-        let cancel_label = &state.cancel;
-        if state.notok.is_some() {
-            let notok_label = state.notok.as_deref().unwrap_or("Not OK");
-            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ").into_diagnostic()?;
-        } else {
-            write!(writer, "[{ok_label}] [{cancel_label}]? ").into_diagnostic()?;
-        }
-        writer.flush().into_diagnostic()?;
-
-        #[cfg(windows)]
-        let line = read_line_from_console(console_in.raw())?;
-        #[cfg(unix)]
-        let line = {
-            let mut l = String::new();
-            reader.read_line(&mut l).into_diagnostic()?;
-            l
-        };
-
-        let input = line.trim().to_lowercase();
-        match input.as_str() {
-            "" | "y" | "yes" | "ok" => Ok(ConfirmResult::Accepted),
-            "n" | "no" | "cancel" => Ok(ConfirmResult::Canceled),
-            _ => {
-                if state.notok.is_some() {
-                    Ok(ConfirmResult::NotOk)
-                } else {
-                    Ok(ConfirmResult::Canceled)
-                }
+    let input = line.trim().to_lowercase();
+    match input.as_str() {
+        "" | "y" | "yes" | "ok" => Ok(ConfirmResult::Accepted),
+        "n" | "no" | "cancel" => Ok(ConfirmResult::Canceled),
+        _ => {
+            if state.notok.is_some() {
+                Ok(ConfirmResult::NotOk)
+            } else {
+                Ok(ConfirmResult::Canceled)
             }
         }
     }
+}
 
-    fn message(&self, state: &PinentryState) -> miette::Result<()> {
-        #[cfg(unix)]
-        let (mut reader, mut writer) = open_tty(state)?;
-        #[cfg(windows)]
-        let (_source, mut writer, console_in) = resolve_console_handles(state)?;
+pub(super) fn message(state: &PinentryState) -> miette::Result<()> {
+    let (_source, mut writer, console_in) = resolve_console_handles(state)?;
 
-        if let Some(ref desc) = state.description {
-            writeln!(writer, "{desc}").into_diagnostic()?;
-        }
-        write!(writer, "[OK] ").into_diagnostic()?;
-        writer.flush().into_diagnostic()?;
-
-        #[cfg(windows)]
-        {
-            read_line_from_console(console_in.raw())?;
-        }
-        #[cfg(unix)]
-        {
-            let mut line = String::new();
-            reader.read_line(&mut line).into_diagnostic()?;
-        }
-        Ok(())
+    if let Some(ref desc) = state.description {
+        writeln!(writer, "{desc}").into_diagnostic()?;
     }
+    write!(writer, "[OK] ").into_diagnostic()?;
+    writer.flush().into_diagnostic()?;
+
+    read_line_from_console(console_in.raw())?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    #[allow(unused_imports)]
     use super::*;
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_valid() {
         assert_eq!(parse_conhost_pid("/conhost/1234"), Some(1234));
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_large() {
         assert_eq!(parse_conhost_pid("/conhost/4294967295"), Some(u32::MAX));
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_zero_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/0"), None);
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_overflow_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/4294967296"), None);
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_negative_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/-1"), None);
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_non_numeric_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/abc"), None);
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_empty_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/"), None);
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_wrong_prefix_returns_none() {
         assert_eq!(parse_conhost_pid("/dev/pts/0"), None);
     }
 
     #[test]
-    #[cfg(windows)]
     fn parse_conhost_pid_empty_string_returns_none() {
         assert_eq!(parse_conhost_pid(""), None);
     }
 
-    #[cfg(windows)]
     #[test]
     fn parse_conhost_pid_no_slash_prefix_returns_none() {
         assert_eq!(parse_conhost_pid("conhost/1234"), None);
