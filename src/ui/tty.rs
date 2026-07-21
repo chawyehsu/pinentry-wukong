@@ -47,6 +47,29 @@ fn open_tty(state: &PinentryState) -> miette::Result<(BufReader<File>, File)> {
 
 // ── Windows helpers ───────────────────────────────────────────────────────────
 
+/// How the Windows console was obtained.
+#[cfg(windows)]
+enum ConsoleSource {
+    /// stdin is already a real console (`GetConsoleMode` succeeds).
+    Direct,
+    /// Attached to an ancestor process's console via process-tree walk.
+    Inherited { pid: u32 },
+    /// `AllocConsole()` created a new console window (last resort).
+    Allocated,
+}
+
+#[cfg(windows)]
+impl Drop for ConsoleSource {
+    fn drop(&mut self) {
+        if let ConsoleSource::Inherited { pid } = self {
+            tracing::debug!("ConsoleSource: releasing inherited console from PID {pid}");
+            unsafe {
+                windows_sys::Win32::System::Console::FreeConsole();
+            }
+        }
+    }
+}
+
 /// RAII wrapper for Windows console handles.
 ///
 /// Tracks whether the handle is borrowed (std handle — must NOT be closed)
@@ -109,45 +132,118 @@ impl Write for ConsoleHandle {
     }
 }
 
-/// Open a console handle on Windows.
+/// Resolve which Windows console to use.
 ///
-/// When stdin/stdout are piped (e.g. gpg-agent spawning us), GetStdHandle
-/// returns the pipe handle, not the console. We try GetStdHandle first,
-/// then fall back to AttachConsole + CreateFileW.
-///
-/// Returns `ConsoleHandle::Borrowed` if the std handle is a real console
-/// (caller must NOT close it), or `ConsoleHandle::Owned` if a new handle
-/// was opened via CreateFileW (closed automatically on drop).
+/// Three-tier fallback:
+/// 1. **Direct** — stdin is already a real console (`GetConsoleMode` succeeds)
+/// 2. **Inherited** — walk the process tree to find an ancestor with a console
+/// 3. **Allocated** — `AllocConsole()` as last resort
 #[cfg(windows)]
-fn open_console_handle(
-    std_handle: windows_sys::Win32::Foundation::HANDLE,
-    device: &str,
-    access: u32,
-) -> miette::Result<ConsoleHandle> {
+fn resolve_console_source() -> miette::Result<ConsoleSource> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    };
     use windows_sys::Win32::System::Console::{
-        ATTACH_PARENT_PROCESS, AttachConsole, GetConsoleMode,
+        AttachConsole, FreeConsole, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE,
     };
 
-    // Check if the std handle is a real console (not a pipe)
+    const MAX_ANCESTOR_DEPTH: u32 = 10;
+
+    // Step 1: Check if stdin is already a real console.
+    let std_handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
     let mut mode: u32 = 0;
     if std_handle != INVALID_HANDLE_VALUE
         && !std_handle.is_null()
         && unsafe { GetConsoleMode(std_handle, &mut mode) } != 0
     {
-        return Ok(ConsoleHandle::Borrowed(std_handle));
+        tracing::debug!("ConsoleSource: Direct (stdin is a console)");
+        return Ok(ConsoleSource::Direct);
     }
 
-    // Handle is piped — try to attach to parent's console.
-    let attached = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
-    tracing::debug!("AttachConsole({device}): {attached}");
+    // Step 2: Walk the process tree to find an ancestor with a console.
+    // Use NtQueryInformationProcess to get the parent PID at each level.
+    let mut current_pid = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() };
+    for depth in 0..MAX_ANCESTOR_DEPTH {
+        let parent_pid = match get_parent_pid(current_pid) {
+            Some(pid) if pid != 0 => pid,
+            _ => {
+                tracing::debug!("ConsoleSource: no more ancestors at depth {depth}");
+                break;
+            }
+        };
 
-    // Try to open the device directly.
+        tracing::debug!("ConsoleSource: trying ancestor PID {parent_pid} at depth {depth}");
+
+        // Detach from any current console before attaching to the ancestor.
+        unsafe { FreeConsole() };
+        let attached = unsafe { AttachConsole(parent_pid) };
+        if attached == 0 {
+            tracing::debug!("ConsoleSource: AttachConsole({parent_pid}) failed, skipping");
+            current_pid = parent_pid;
+            continue;
+        }
+
+        // Verify we can actually open a console device.
+        let test = open_device("CONIN$", 0xC0000000);
+        if test.is_some() {
+            tracing::debug!("ConsoleSource: Inherited from PID {parent_pid} at depth {depth}");
+            return Ok(ConsoleSource::Inherited { pid: parent_pid });
+        }
+
+        current_pid = parent_pid;
+    }
+
+    // Step 3: Allocate a new console as last resort.
+    use windows_sys::Win32::System::Console::AllocConsole;
+    unsafe { FreeConsole() };
+    let allocated = unsafe { AllocConsole() };
+    tracing::debug!("ConsoleSource: Allocated (AllocConsole returned {allocated})");
+    Ok(ConsoleSource::Allocated)
+}
+
+/// Get the parent PID of a process via `NtQueryInformationProcess`.
+#[cfg(windows)]
+fn get_parent_pid(pid: u32) -> Option<u32> {
+    use windows_sys::Wdk::System::Threading::NtQueryInformationProcess;
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_BASIC_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    // Open the target process.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return None;
+    }
+
+    let mut pbi: PROCESS_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    let mut return_len: u32 = 0;
+    let status = unsafe {
+        NtQueryInformationProcess(
+            handle,
+            0, // ProcessBasicInformation
+            &mut pbi as *mut _ as *mut _,
+            std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+            &mut return_len,
+        )
+    };
+    unsafe { CloseHandle(handle) };
+
+    if status != 0 {
+        return None;
+    }
+
+    Some(pbi.InheritedFromUniqueProcessId as u32)
+}
+
+/// Try to open a Windows console device. Returns `Some(handle)` on success.
+#[cfg(windows)]
+fn open_device(device: &str, access: u32) -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+
     let device_w: Vec<u16> = device.encode_utf16().chain(std::iter::once(0)).collect();
-    let try_open = || unsafe {
+    let h = unsafe {
         CreateFileW(
             device_w.as_ptr(),
             access,
@@ -158,21 +254,43 @@ fn open_console_handle(
             INVALID_HANDLE_VALUE,
         )
     };
-
-    let h = try_open();
     if h != INVALID_HANDLE_VALUE && !h.is_null() {
-        return Ok(ConsoleHandle::Owned(h));
+        Some(h)
+    } else {
+        None
     }
+}
 
-    // Open failed — allocate a console and try again.
-    use windows_sys::Win32::System::Console::AllocConsole;
-    let allocated = unsafe { AllocConsole() };
-    tracing::debug!("AllocConsole({device}): {allocated}");
-    let h = try_open();
-    if h == INVALID_HANDLE_VALUE || h.is_null() {
-        return Err(miette::miette!("failed to open {device}"));
+/// Open a console handle from a resolved `ConsoleSource`.
+#[cfg(windows)]
+fn open_console_handle(
+    source: &ConsoleSource,
+    device: &str,
+    access: u32,
+) -> miette::Result<ConsoleHandle> {
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+
+    match source {
+        ConsoleSource::Direct => {
+            let std_handle = match device {
+                "CONIN$" => unsafe { GetStdHandle(STD_INPUT_HANDLE) },
+                _ => unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
+            };
+            Ok(ConsoleHandle::Borrowed(std_handle))
+        }
+        ConsoleSource::Inherited { .. } | ConsoleSource::Allocated => open_device(device, access)
+            .map(ConsoleHandle::Owned)
+            .ok_or_else(|| miette::miette!("failed to open {device}")),
     }
-    Ok(ConsoleHandle::Owned(h))
+}
+
+/// Resolve console source and open both CONIN$ and CONOUT$ handles.
+#[cfg(windows)]
+fn resolve_console_handles() -> miette::Result<(ConsoleSource, ConsoleHandle, ConsoleHandle)> {
+    let source = resolve_console_source()?;
+    let writer = open_console_handle(&source, "CONOUT$", 0x40000000)?;
+    let reader = open_console_handle(&source, "CONIN$", 0xC0000000)?;
+    Ok((source, writer, reader))
 }
 
 /// Read a line from a console handle (Windows).
@@ -215,23 +333,19 @@ fn read_line_from_console(
     Ok(line)
 }
 
-/// Read a password from the Windows console with echo disabled.
+/// Read a password from a Windows console handle with echo disabled.
 ///
-/// Uses ConsoleHandle for RAII cleanup — the owned handle from CreateFileW
-/// is closed automatically when the function returns.
+/// Caller provides the console input handle (already opened).
+/// Console mode is restored before returning.
 #[cfg(windows)]
-fn read_password_windows() -> miette::Result<String> {
-    use windows_sys::Win32::System::Console::{
-        GetConsoleMode, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, SetConsoleMode,
-    };
+fn read_password_windows(console_in: &ConsoleHandle) -> miette::Result<String> {
+    use windows_sys::Win32::System::Console::{GetConsoleMode, ReadConsoleW, SetConsoleMode};
 
     const ENABLE_ECHO_INPUT: u32 = 0x0004;
     const ENABLE_LINE_INPUT: u32 = 0x0002;
     const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
 
-    let std_handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-    let console = open_console_handle(std_handle, "CONIN$", 0xC0000000)?; // GENERIC_READ | GENERIC_WRITE
-    let handle = console.raw();
+    let handle = console_in.raw();
 
     // Save original console mode
     let mut original_mode: u32 = 0;
@@ -315,13 +429,9 @@ impl PinentryUi for TtyUi {
                 .into_diagnostic()?
         };
         #[cfg(windows)]
-        let mut writer = {
-            use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
-            open_console_handle(
-                unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
-                "CONOUT$",
-                0x40000000,
-            )?
+        let (mut writer, console_in) = {
+            let (_source, w, r) = resolve_console_handles()?;
+            (w, r)
         };
 
         if let Some(ref desc) = state.description {
@@ -344,7 +454,7 @@ impl PinentryUi for TtyUi {
             rpassword::read_password_with_config(config).into_diagnostic()?
         };
         #[cfg(windows)]
-        let pin = read_password_windows()?;
+        let pin = read_password_windows(&console_in)?;
 
         if pin.is_empty() {
             return Ok(GetPinResult::Closed);
@@ -357,19 +467,7 @@ impl PinentryUi for TtyUi {
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
         let (mut writer, console_in) = {
-            use windows_sys::Win32::System::Console::{
-                GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-            };
-            let w = open_console_handle(
-                unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
-                "CONOUT$",
-                0x40000000,
-            )?;
-            let r = open_console_handle(
-                unsafe { GetStdHandle(STD_INPUT_HANDLE) },
-                "CONIN$",
-                0xC0000000,
-            )?;
+            let (_source, w, r) = resolve_console_handles()?;
             (w, r)
         };
 
@@ -418,19 +516,7 @@ impl PinentryUi for TtyUi {
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
         let (mut writer, console_in) = {
-            use windows_sys::Win32::System::Console::{
-                GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-            };
-            let w = open_console_handle(
-                unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
-                "CONOUT$",
-                0x40000000,
-            )?;
-            let r = open_console_handle(
-                unsafe { GetStdHandle(STD_INPUT_HANDLE) },
-                "CONIN$",
-                0xC0000000,
-            )?;
+            let (_source, w, r) = resolve_console_handles()?;
             (w, r)
         };
 
