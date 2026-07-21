@@ -23,7 +23,7 @@ pub struct App {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// The verbosity level (default: trace)
+    /// The verbosity level
     #[command(flatten)]
     verbose: Verbosity,
 

@@ -1,6 +1,5 @@
 ---
 source: tests/e2e/mod.rs
-assertion_line: 11
 info:
   program: pinentry-wukong
   args:
