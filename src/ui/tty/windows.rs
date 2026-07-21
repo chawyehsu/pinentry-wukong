@@ -291,13 +291,17 @@ fn open_console_handle(
 }
 
 /// Resolve console source and open both CONIN$ and CONOUT$ handles.
+///
+/// Returns the source alongside the handles so it stays alive for their
+/// entire lifetime — `Drop` detaches the console, which must happen after
+/// all console I/O is complete.
 fn resolve_console_handles(
     state: &PinentryState,
-) -> miette::Result<(ConsoleHandle, ConsoleHandle)> {
+) -> miette::Result<(ConsoleHandle, ConsoleHandle, ConsoleSource)> {
     let source = resolve_console_source(state)?;
     let writer = open_console_handle(&source, "CONOUT$", 0x40000000)?;
     let reader = open_console_handle(&source, "CONIN$", 0xC0000000)?;
-    Ok((writer, reader))
+    Ok((writer, reader, source))
 }
 
 /// Read a password with echo disabled. Returns `SecretBytes` (zeroed on drop).
@@ -320,7 +324,7 @@ fn read_password(
 }
 
 pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
-    let (mut writer, reader) = resolve_console_handles(state)?;
+    let (mut writer, reader, _source) = resolve_console_handles(state)?;
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").into_diagnostic()?;
@@ -341,7 +345,7 @@ pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
 }
 
 pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
-    let (mut writer, reader) = resolve_console_handles(state)?;
+    let (mut writer, reader, _source) = resolve_console_handles(state)?;
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").into_diagnostic()?;
@@ -377,7 +381,7 @@ pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
 }
 
 pub(super) fn message(state: &PinentryState) -> miette::Result<()> {
-    let (mut writer, reader) = resolve_console_handles(state)?;
+    let (mut writer, reader, _source) = resolve_console_handles(state)?;
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").into_diagnostic()?;
