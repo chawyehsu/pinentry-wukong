@@ -1,7 +1,9 @@
 use std::io::Write;
 
 use miette::IntoDiagnostic;
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
@@ -10,6 +12,7 @@ use windows_sys::Win32::System::Console::{
     FreeConsole, GetConsoleMode, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
     SetConsoleMode, WriteConsoleW,
 };
+use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
 use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
 
@@ -83,19 +86,20 @@ impl ConsoleHandle {
     }
 
     /// Read a line from the console, handling backspace. Reads until Enter.
-    fn read_line(&self) -> miette::Result<String> {
-        let bytes = self.read_line_bytes()?;
+    fn read_line(&self, timeout_secs: u32) -> miette::Result<String> {
+        let bytes = self.read_line_bytes(timeout_secs)?;
         String::from_utf8(bytes)
             .map_err(|e| miette::miette!("console input was not valid UTF-8: {e}"))
     }
 
     /// Read a line into raw bytes, handling backspace. Reads until Enter.
-    ///
-    /// Returns `SecretBytes` so the buffer is zeroed on drop.
-    fn read_line_bytes(&self) -> miette::Result<Vec<u8>> {
+    fn read_line_bytes(&self, timeout_secs: u32) -> miette::Result<Vec<u8>> {
         let handle = self.raw();
         let mut buf = Vec::new();
         loop {
+            if !wait_for_input(handle, timeout_secs)? {
+                break;
+            }
             let mut wide: [u16; 1] = [0];
             let mut chars_read: u32 = 0;
             if unsafe {
@@ -172,6 +176,22 @@ impl Write for ConsoleHandle {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+/// Wait for input to become available on a console handle.
+///
+/// Returns `true` if input is ready, `false` if the timeout elapsed.
+fn wait_for_input(handle: HANDLE, timeout_secs: u32) -> miette::Result<bool> {
+    let ms = if timeout_secs == 0 {
+        0xFFFFFFFF // INFINITE
+    } else {
+        timeout_secs * 1000
+    };
+    match unsafe { WaitForSingleObject(handle, ms) } {
+        WAIT_OBJECT_0 => Ok(true),
+        WAIT_TIMEOUT => Ok(false),
+        _ => Err(miette::miette!("WaitForSingleObject failed")),
     }
 }
 
@@ -275,12 +295,13 @@ fn resolve_console_handles(
 fn read_password(
     reader: &ConsoleHandle,
     writer: &mut ConsoleHandle,
+    timeout_secs: u32,
 ) -> miette::Result<SecretBytes> {
     let new_mode = ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT;
 
     let secret = {
         let _guard = reader.set_mode(new_mode)?;
-        SecretBytes::from(reader.read_line_bytes()?)
+        SecretBytes::from(reader.read_line_bytes(timeout_secs)?)
     };
 
     // Echo was disabled, so the user's Enter didn't produce a visible newline
@@ -302,7 +323,7 @@ pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
     write!(writer, "{prompt} ").into_diagnostic()?;
     writer.flush().into_diagnostic()?;
 
-    let pin = read_password(&reader, &mut writer)?;
+    let pin = read_password(&reader, &mut writer, state.timeout)?;
 
     if pin.is_empty() {
         return Ok(GetPinResult::Closed);
@@ -330,7 +351,7 @@ pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
     }
     writer.flush().into_diagnostic()?;
 
-    let line = reader.read_line()?;
+    let line = reader.read_line(state.timeout)?;
 
     let input = line.trim().to_lowercase();
     match input.as_str() {
@@ -355,7 +376,7 @@ pub(super) fn message(state: &PinentryState) -> miette::Result<()> {
     write!(writer, "[OK] ").into_diagnostic()?;
     writer.flush().into_diagnostic()?;
 
-    reader.read_line()?;
+    reader.read_line(state.timeout)?;
     Ok(())
 }
 
