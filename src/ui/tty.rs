@@ -485,6 +485,7 @@ impl PinentryUi for TtyUi {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]
@@ -494,6 +495,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_large() {
         assert_eq!(parse_conhost_pid("/conhost/4294967295"), Some(u32::MAX));
     }
