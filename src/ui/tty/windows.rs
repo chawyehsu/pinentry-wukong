@@ -6,8 +6,9 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{
-    AllocConsole, AttachConsole, FreeConsole, GetConsoleMode, GetStdHandle, ReadConsoleW,
-    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode, WriteConsoleW,
+    AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
+    FreeConsole, GetConsoleMode, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    SetConsoleMode, WriteConsoleW,
 };
 
 use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
@@ -47,7 +48,7 @@ enum ConsoleHandle {
 /// RAII guard that restores the original console mode on drop.
 struct ConsoleModeGuard {
     handle: HANDLE,
-    original_mode: u32,
+    original_mode: CONSOLE_MODE,
 }
 
 impl Drop for ConsoleModeGuard {
@@ -66,9 +67,9 @@ impl ConsoleHandle {
     }
 
     /// Change the console mode, returning a guard that restores the original on drop.
-    fn set_mode(&self, mode: u32) -> miette::Result<ConsoleModeGuard> {
+    fn set_mode(&self, mode: CONSOLE_MODE) -> miette::Result<ConsoleModeGuard> {
         let handle = self.raw();
-        let mut original_mode: u32 = 0;
+        let mut original_mode: CONSOLE_MODE = 0;
         if unsafe { GetConsoleMode(handle, &mut original_mode) } == 0 {
             return Err(miette::miette!("GetConsoleMode failed on console handle"));
         }
@@ -275,9 +276,6 @@ fn read_password(
     reader: &ConsoleHandle,
     writer: &mut ConsoleHandle,
 ) -> miette::Result<SecretBytes> {
-    const ENABLE_LINE_INPUT: u32 = 0x0002;
-    const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
-
     let new_mode = ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT;
 
     let secret = {
