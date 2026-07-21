@@ -1,7 +1,10 @@
+#[cfg(unix)]
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
-#[cfg(windows)]
-use std::os::windows::io::FromRawHandle;
+#[cfg(unix)]
+use std::io::BufRead;
+#[cfg(unix)]
+use std::io::BufReader;
+use std::io::Write;
 
 use miette::IntoDiagnostic;
 
@@ -44,24 +47,87 @@ fn open_tty(state: &PinentryState) -> miette::Result<(BufReader<File>, File)> {
 
 // ── Windows helpers ───────────────────────────────────────────────────────────
 
+/// RAII wrapper for Windows console handles.
+///
+/// Tracks whether the handle is borrowed (std handle — must NOT be closed)
+/// or owned (from CreateFileW — must be closed on drop).
+#[cfg(windows)]
+enum ConsoleHandle {
+    /// Borrowed from GetStdHandle — do not close.
+    Borrowed(windows_sys::Win32::Foundation::HANDLE),
+    /// Owned — created via CreateFileW, must be closed.
+    Owned(windows_sys::Win32::Foundation::HANDLE),
+}
+
+#[cfg(windows)]
+impl ConsoleHandle {
+    fn raw(&self) -> windows_sys::Win32::Foundation::HANDLE {
+        match self {
+            ConsoleHandle::Borrowed(h) | ConsoleHandle::Owned(h) => *h,
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ConsoleHandle {
+    fn drop(&mut self) {
+        if let ConsoleHandle::Owned(h) = self {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(*h);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Write for ConsoleHandle {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use windows_sys::Win32::System::Console::WriteConsoleW;
+
+        // Convert UTF-8 bytes to UTF-16 and write via WriteConsoleW.
+        let text = std::str::from_utf8(buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        let mut written: u32 = 0;
+        if unsafe {
+            WriteConsoleW(
+                self.raw(),
+                wide.as_ptr() as *const _,
+                wide.len() as u32,
+                &mut written,
+                std::ptr::null(),
+            )
+        } == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(buf.len()) // return original byte count
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Open a console handle on Windows.
 ///
 /// When stdin/stdout are piped (e.g. gpg-agent spawning us), GetStdHandle
 /// returns the pipe handle, not the console. We try GetStdHandle first,
 /// then fall back to AttachConsole + CreateFileW.
+///
+/// Returns `ConsoleHandle::Borrowed` if the std handle is a real console
+/// (caller must NOT close it), or `ConsoleHandle::Owned` if a new handle
+/// was opened via CreateFileW (closed automatically on drop).
 #[cfg(windows)]
 fn open_console_handle(
     std_handle: windows_sys::Win32::Foundation::HANDLE,
     device: &str,
     access: u32,
-) -> miette::Result<windows_sys::Win32::Foundation::HANDLE> {
+) -> miette::Result<ConsoleHandle> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows_sys::Win32::System::Console::{
-        ATTACH_PARENT_PROCESS, AttachConsole, GetConsoleMode,
-    };
+    use windows_sys::Win32::System::Console::{AttachConsole, GetConsoleMode, ATTACH_PARENT_PROCESS};
 
     // Check if the std handle is a real console (not a pipe)
     let mut mode: u32 = 0;
@@ -69,7 +135,7 @@ fn open_console_handle(
         && !std_handle.is_null()
         && unsafe { GetConsoleMode(std_handle, &mut mode) } != 0
     {
-        return Ok(std_handle);
+        return Ok(ConsoleHandle::Borrowed(std_handle));
     }
 
     // Handle is piped — try to attach to parent's console.
@@ -92,7 +158,7 @@ fn open_console_handle(
 
     let h = try_open();
     if h != INVALID_HANDLE_VALUE && !h.is_null() {
-        return Ok(h);
+        return Ok(ConsoleHandle::Owned(h));
     }
 
     // Open failed — allocate a console and try again.
@@ -103,26 +169,53 @@ fn open_console_handle(
     if h == INVALID_HANDLE_VALUE || h.is_null() {
         return Err(miette::miette!("failed to open {device}"));
     }
-    Ok(h)
+    Ok(ConsoleHandle::Owned(h))
 }
 
-/// Open the console for writing (Windows).
+/// Read a line from a console handle (Windows).
+///
+/// Uses ReadConsoleW to read wide characters until Enter.
 #[cfg(windows)]
-fn open_console_out() -> miette::Result<File> {
-    use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
+fn read_line_from_console(handle: windows_sys::Win32::Foundation::HANDLE) -> miette::Result<String> {
+    use windows_sys::Win32::System::Console::ReadConsoleW;
 
-    let std_handle = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
-    let handle = open_console_handle(std_handle, "CONOUT$", 0x40000000)?; // GENERIC_WRITE
-    Ok(unsafe { File::from_raw_handle(handle as *mut _) })
+    let mut line = String::new();
+    loop {
+        let mut buf: [u16; 1] = [0];
+        let mut chars_read: u32 = 0;
+        if unsafe {
+            ReadConsoleW(
+                handle,
+                buf.as_mut_ptr() as *mut _,
+                1,
+                &mut chars_read,
+                std::ptr::null(),
+            )
+        } == 0
+        {
+            return Err(miette::miette!("ReadConsoleW failed"));
+        }
+        if chars_read == 0 {
+            break;
+        }
+        match buf[0] {
+            0x000D | 0x000A => break,
+            c => {
+                if let Some(ch) = char::from_u32(c as u32) {
+                    line.push(ch);
+                }
+            }
+        }
+    }
+    Ok(line)
 }
 
 /// Read a password from the Windows console with echo disabled.
 ///
-/// Opens CONIN$ via AttachConsole when stdin is piped, then uses
-/// SetConsoleMode + ReadConsoleW to read with echo disabled.
+/// Uses ConsoleHandle for RAII cleanup — the owned handle from CreateFileW
+/// is closed automatically when the function returns.
 #[cfg(windows)]
 fn read_password_windows() -> miette::Result<String> {
-    use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::Console::{
         GetConsoleMode, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, SetConsoleMode,
     };
@@ -131,8 +224,9 @@ fn read_password_windows() -> miette::Result<String> {
     const ENABLE_LINE_INPUT: u32 = 0x0002;
     const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
 
-    let std_handle: HANDLE = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-    let handle = open_console_handle(std_handle, "CONIN$", 0xC0000000)?; // GENERIC_READ | GENERIC_WRITE
+    let std_handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    let console = open_console_handle(std_handle, "CONIN$", 0xC0000000)?; // GENERIC_READ | GENERIC_WRITE
+    let handle = console.raw();
 
     // Save original console mode
     let mut original_mode: u32 = 0;
@@ -171,7 +265,7 @@ fn read_password_windows() -> miette::Result<String> {
                 break;
             }
             match buf[0] {
-                0x000D | 0x000A => break, // \r or \n
+                0x000D | 0x000A => break,
                 0x0008 | 0x007F => {
                     password.pop();
                 }
@@ -185,10 +279,11 @@ fn read_password_windows() -> miette::Result<String> {
         Ok(())
     })();
 
-    // Always restore original mode
+    // Always restore original mode (before console is dropped/closed)
     unsafe {
         SetConsoleMode(handle, original_mode);
     }
+    // console is dropped here — Owned handle is closed automatically
 
     result?;
 
@@ -215,7 +310,10 @@ impl PinentryUi for TtyUi {
                 .into_diagnostic()?
         };
         #[cfg(windows)]
-        let mut writer = open_console_out()?;
+        let mut writer = {
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
+            open_console_handle(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }, "CONOUT$", 0x40000000)?
+        };
 
         if let Some(ref desc) = state.description {
             writeln!(writer, "{desc}").into_diagnostic()?;
@@ -249,16 +347,11 @@ impl PinentryUi for TtyUi {
         #[cfg(unix)]
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
-        let (mut reader, mut writer) = {
-            let w = open_console_out()?;
-            let r = BufReader::new(
-                OpenOptions::new()
-                    .read(true)
-                    .open("CONIN$")
-                    .or_else(|_| OpenOptions::new().read(true).open("CON"))
-                    .into_diagnostic()?,
-            );
-            (r, w)
+        let (mut writer, console_in) = {
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+            let w = open_console_handle(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }, "CONOUT$", 0x40000000)?;
+            let r = open_console_handle(unsafe { GetStdHandle(STD_INPUT_HANDLE) }, "CONIN$", 0xC0000000)?;
+            (w, r)
         };
 
         if let Some(ref desc) = state.description {
@@ -272,30 +365,33 @@ impl PinentryUi for TtyUi {
         let cancel_label = &state.cancel;
         if state.notok.is_some() {
             let notok_label = state.notok.as_deref().unwrap_or("Not OK");
-            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ").into_diagnostic()?;
+            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ")
+                .into_diagnostic()?;
         } else {
             write!(writer, "[{ok_label}] [{cancel_label}]? ").into_diagnostic()?;
         }
         writer.flush().into_diagnostic()?;
 
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => Ok(ConfirmResult::Closed),
-            Ok(_) => {
-                let input = line.trim().to_lowercase();
-                match input.as_str() {
-                    "" | "y" | "yes" | "ok" => Ok(ConfirmResult::Accepted),
-                    "n" | "no" | "cancel" => Ok(ConfirmResult::Canceled),
-                    _ => {
-                        if state.notok.is_some() {
-                            Ok(ConfirmResult::NotOk)
-                        } else {
-                            Ok(ConfirmResult::Canceled)
-                        }
-                    }
+        #[cfg(windows)]
+        let line = read_line_from_console(console_in.raw())?;
+        #[cfg(unix)]
+        let line = {
+            let mut l = String::new();
+            reader.read_line(&mut l).into_diagnostic()?;
+            l
+        };
+
+        let input = line.trim().to_lowercase();
+        match input.as_str() {
+            "" | "y" | "yes" | "ok" => Ok(ConfirmResult::Accepted),
+            "n" | "no" | "cancel" => Ok(ConfirmResult::Canceled),
+            _ => {
+                if state.notok.is_some() {
+                    Ok(ConfirmResult::NotOk)
+                } else {
+                    Ok(ConfirmResult::Canceled)
                 }
             }
-            Err(e) => Err(miette::miette!("failed to read input: {e}")),
         }
     }
 
@@ -303,16 +399,11 @@ impl PinentryUi for TtyUi {
         #[cfg(unix)]
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
-        let (mut reader, mut writer) = {
-            let w = open_console_out()?;
-            let r = BufReader::new(
-                OpenOptions::new()
-                    .read(true)
-                    .open("CONIN$")
-                    .or_else(|_| OpenOptions::new().read(true).open("CON"))
-                    .into_diagnostic()?,
-            );
-            (r, w)
+        let (mut writer, console_in) = {
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+            let w = open_console_handle(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }, "CONOUT$", 0x40000000)?;
+            let r = open_console_handle(unsafe { GetStdHandle(STD_INPUT_HANDLE) }, "CONIN$", 0xC0000000)?;
+            (w, r)
         };
 
         if let Some(ref desc) = state.description {
@@ -321,8 +412,15 @@ impl PinentryUi for TtyUi {
         write!(writer, "[OK] ").into_diagnostic()?;
         writer.flush().into_diagnostic()?;
 
-        let mut line = String::new();
-        reader.read_line(&mut line).into_diagnostic()?;
+        #[cfg(windows)]
+        {
+            read_line_from_console(console_in.raw())?;
+        }
+        #[cfg(unix)]
+        {
+            let mut line = String::new();
+            reader.read_line(&mut line).into_diagnostic()?;
+        }
         Ok(())
     }
 }
