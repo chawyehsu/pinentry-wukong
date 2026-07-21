@@ -39,6 +39,12 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      - name: DBus requirements (Linux Secret Service)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt install -y libdbus-1-dev pkg-config
+
       - name: Generate Coverage
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.out
 
