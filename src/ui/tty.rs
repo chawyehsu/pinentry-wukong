@@ -85,7 +85,8 @@ impl Write for ConsoleHandle {
         use windows_sys::Win32::System::Console::WriteConsoleW;
 
         // Convert UTF-8 bytes to UTF-16 and write via WriteConsoleW.
-        let text = std::str::from_utf8(buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let text = std::str::from_utf8(buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let wide: Vec<u16> = text.encode_utf16().collect();
         let mut written: u32 = 0;
         if unsafe {
@@ -127,7 +128,9 @@ fn open_console_handle(
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows_sys::Win32::System::Console::{AttachConsole, GetConsoleMode, ATTACH_PARENT_PROCESS};
+    use windows_sys::Win32::System::Console::{
+        ATTACH_PARENT_PROCESS, AttachConsole, GetConsoleMode,
+    };
 
     // Check if the std handle is a real console (not a pipe)
     let mut mode: u32 = 0;
@@ -176,7 +179,9 @@ fn open_console_handle(
 ///
 /// Uses ReadConsoleW to read wide characters until Enter.
 #[cfg(windows)]
-fn read_line_from_console(handle: windows_sys::Win32::Foundation::HANDLE) -> miette::Result<String> {
+fn read_line_from_console(
+    handle: windows_sys::Win32::Foundation::HANDLE,
+) -> miette::Result<String> {
     use windows_sys::Win32::System::Console::ReadConsoleW;
 
     let mut line = String::new();
@@ -312,7 +317,11 @@ impl PinentryUi for TtyUi {
         #[cfg(windows)]
         let mut writer = {
             use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
-            open_console_handle(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }, "CONOUT$", 0x40000000)?
+            open_console_handle(
+                unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
+                "CONOUT$",
+                0x40000000,
+            )?
         };
 
         if let Some(ref desc) = state.description {
@@ -348,9 +357,19 @@ impl PinentryUi for TtyUi {
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
         let (mut writer, console_in) = {
-            use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
-            let w = open_console_handle(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }, "CONOUT$", 0x40000000)?;
-            let r = open_console_handle(unsafe { GetStdHandle(STD_INPUT_HANDLE) }, "CONIN$", 0xC0000000)?;
+            use windows_sys::Win32::System::Console::{
+                GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+            };
+            let w = open_console_handle(
+                unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
+                "CONOUT$",
+                0x40000000,
+            )?;
+            let r = open_console_handle(
+                unsafe { GetStdHandle(STD_INPUT_HANDLE) },
+                "CONIN$",
+                0xC0000000,
+            )?;
             (w, r)
         };
 
@@ -365,8 +384,7 @@ impl PinentryUi for TtyUi {
         let cancel_label = &state.cancel;
         if state.notok.is_some() {
             let notok_label = state.notok.as_deref().unwrap_or("Not OK");
-            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ")
-                .into_diagnostic()?;
+            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ").into_diagnostic()?;
         } else {
             write!(writer, "[{ok_label}] [{cancel_label}]? ").into_diagnostic()?;
         }
@@ -400,9 +418,19 @@ impl PinentryUi for TtyUi {
         let (mut reader, mut writer) = open_tty(state)?;
         #[cfg(windows)]
         let (mut writer, console_in) = {
-            use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
-            let w = open_console_handle(unsafe { GetStdHandle(STD_OUTPUT_HANDLE) }, "CONOUT$", 0x40000000)?;
-            let r = open_console_handle(unsafe { GetStdHandle(STD_INPUT_HANDLE) }, "CONIN$", 0xC0000000)?;
+            use windows_sys::Win32::System::Console::{
+                GetStdHandle, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+            };
+            let w = open_console_handle(
+                unsafe { GetStdHandle(STD_OUTPUT_HANDLE) },
+                "CONOUT$",
+                0x40000000,
+            )?;
+            let r = open_console_handle(
+                unsafe { GetStdHandle(STD_INPUT_HANDLE) },
+                "CONIN$",
+                0xC0000000,
+            )?;
             (w, r)
         };
 
