@@ -271,7 +271,10 @@ fn resolve_console_handles(
 }
 
 /// Read a password with echo disabled. Returns `SecretBytes` (zeroed on drop).
-fn read_password(reader: &ConsoleHandle) -> miette::Result<SecretBytes> {
+fn read_password(
+    reader: &ConsoleHandle,
+    writer: &mut ConsoleHandle,
+) -> miette::Result<SecretBytes> {
     const ENABLE_LINE_INPUT: u32 = 0x0002;
     const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
 
@@ -282,8 +285,8 @@ fn read_password(reader: &ConsoleHandle) -> miette::Result<SecretBytes> {
         SecretBytes::from(reader.read_line_bytes()?)
     };
 
-    // Write a newline since echo was disabled
-    let _ = writeln!(std::io::stdout());
+    // Echo was disabled, so the user's Enter didn't produce a visible newline
+    writeln!(writer).into_diagnostic()?;
 
     Ok(secret)
 }
@@ -301,7 +304,7 @@ pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
     write!(writer, "{prompt} ").into_diagnostic()?;
     writer.flush().into_diagnostic()?;
 
-    let pin = read_password(&reader)?;
+    let pin = read_password(&reader, &mut writer)?;
 
     if pin.is_empty() {
         return Ok(GetPinResult::Closed);
