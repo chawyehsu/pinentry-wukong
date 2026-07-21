@@ -18,9 +18,12 @@ Arguments:
   <SHELL>  The shell type [possible values: bash, elvish, fish, powershell, zsh]
 
 Options:
-  -v, --verbose...       Increase logging verbosity
-  -q, --quiet...         Decrease logging verbosity
-      --log-file <PATH>  Write logs to a file instead of the default <exe>.log
-  -h, --help             Print help
+  -v, --verbose...     Increase logging verbosity
+  -q, --quiet...       Decrease logging verbosity
+      --debug          Enable debug logging (equivalent to -vvv)
+      --config <PATH>  Path to a custom config file
+      --keyring        Enable system keyring for secret management (default)
+      --no-keyring     Disable system keyring for secret management
+  -h, --help           Print help
 
 ----- stderr -----

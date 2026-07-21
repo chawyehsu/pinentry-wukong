@@ -23,11 +23,11 @@ jobs:
       id-token: write
     steps:
       - name: Checkout Source
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup crates.io Auth
         id: auth
-        uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
 
       - name: Cargo Publish
         run: cargo publish --registry crates-io
@@ -40,4 +40,4 @@ jobs:
     needs: [build, cargo_publish]
     steps:
       - name: Draft Release
-        uses: chawyehsu/actions/create-release@32ef5b304a150e4251de26cea984db91d9dfcab1 # v1.1.0
+        uses: chawyehsu/actions/create-release@9773d15823b8c49b477a78ae968355a3e8fe5cda # v1.2.0

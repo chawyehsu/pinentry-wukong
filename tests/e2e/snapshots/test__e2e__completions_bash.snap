@@ -1,6 +1,5 @@
 ---
 source: tests/e2e/mod.rs
-assertion_line: 12
 info:
   program: pinentry-wukong
   args:
@@ -31,20 +30,59 @@ _pinentry-wukong() {
             pinentry__wukong,completions)
                 cmd="pinentry__wukong__subcmd__completions"
                 ;;
+            pinentry__wukong,config)
+                cmd="pinentry__wukong__subcmd__config"
+                ;;
             pinentry__wukong,help)
                 cmd="pinentry__wukong__subcmd__help"
                 ;;
             pinentry__wukong,serve)
                 cmd="pinentry__wukong__subcmd__serve"
                 ;;
+            pinentry__wukong__subcmd__config,edit)
+                cmd="pinentry__wukong__subcmd__config__subcmd__edit"
+                ;;
+            pinentry__wukong__subcmd__config,help)
+                cmd="pinentry__wukong__subcmd__config__subcmd__help"
+                ;;
+            pinentry__wukong__subcmd__config,list)
+                cmd="pinentry__wukong__subcmd__config__subcmd__list"
+                ;;
+            pinentry__wukong__subcmd__config,path)
+                cmd="pinentry__wukong__subcmd__config__subcmd__path"
+                ;;
+            pinentry__wukong__subcmd__config__subcmd__help,edit)
+                cmd="pinentry__wukong__subcmd__config__subcmd__help__subcmd__edit"
+                ;;
+            pinentry__wukong__subcmd__config__subcmd__help,help)
+                cmd="pinentry__wukong__subcmd__config__subcmd__help__subcmd__help"
+                ;;
+            pinentry__wukong__subcmd__config__subcmd__help,list)
+                cmd="pinentry__wukong__subcmd__config__subcmd__help__subcmd__list"
+                ;;
+            pinentry__wukong__subcmd__config__subcmd__help,path)
+                cmd="pinentry__wukong__subcmd__config__subcmd__help__subcmd__path"
+                ;;
             pinentry__wukong__subcmd__help,completions)
                 cmd="pinentry__wukong__subcmd__help__subcmd__completions"
+                ;;
+            pinentry__wukong__subcmd__help,config)
+                cmd="pinentry__wukong__subcmd__help__subcmd__config"
                 ;;
             pinentry__wukong__subcmd__help,help)
                 cmd="pinentry__wukong__subcmd__help__subcmd__help"
                 ;;
             pinentry__wukong__subcmd__help,serve)
                 cmd="pinentry__wukong__subcmd__help__subcmd__serve"
+                ;;
+            pinentry__wukong__subcmd__help__subcmd__config,edit)
+                cmd="pinentry__wukong__subcmd__help__subcmd__config__subcmd__edit"
+                ;;
+            pinentry__wukong__subcmd__help__subcmd__config,list)
+                cmd="pinentry__wukong__subcmd__help__subcmd__config__subcmd__list"
+                ;;
+            pinentry__wukong__subcmd__help__subcmd__config,path)
+                cmd="pinentry__wukong__subcmd__help__subcmd__config__subcmd__path"
                 ;;
             *)
                 ;;
@@ -53,13 +91,13 @@ _pinentry-wukong() {
 
     case "${cmd}" in
         pinentry__wukong)
-            opts="-v -q -d -D -T -N -C -M -o -g -h -V --verbose --quiet --log-file --debug --display --ttyname --ttytype --lc-ctype --lc-messages --timeout --no-global-grab --ui --no-keychain --help --version serve completions help"
+            opts="-v -q -D -T -N -C -M -o -g -h -V --verbose --quiet --debug --config --keyring --no-keyring --display --ttyname --ttytype --lc-ctype --lc-messages --timeout --no-global-grab --ui --help --version serve completions config help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
-                --log-file)
+                --config)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
@@ -123,13 +161,155 @@ _pinentry-wukong() {
             return 0
             ;;
         pinentry__subcmd__wukong__subcmd__completions)
-            opts="-v -q -h --verbose --quiet --log-file --help bash elvish fish powershell zsh"
+            opts="-v -q -h --verbose --quiet --debug --config --keyring --no-keyring --help bash elvish fish powershell zsh"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
-                --log-file)
+                --config)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config)
+            opts="-v -q -h --verbose --quiet --debug --config --keyring --no-keyring --help edit list path help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --config)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__edit)
+            opts="-v -q -h --verbose --quiet --debug --config --keyring --no-keyring --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --config)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__help)
+            opts="edit list path help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__help__subcmd__edit)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__help__subcmd__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__help__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__help__subcmd__path)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__list)
+            opts="-v -q -h --verbose --quiet --debug --config --keyring --no-keyring --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --config)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__config__subcmd__path)
+            opts="-v -q -h --verbose --quiet --debug --config --keyring --no-keyring --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --config)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
@@ -141,7 +321,7 @@ _pinentry-wukong() {
             return 0
             ;;
         pinentry__subcmd__wukong__subcmd__help)
-            opts="serve completions help"
+            opts="serve completions config help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -157,6 +337,62 @@ _pinentry-wukong() {
         pinentry__subcmd__wukong__subcmd__help__subcmd__completions)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__help__subcmd__config)
+            opts="edit list path"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__help__subcmd__config__subcmd__edit)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__help__subcmd__config__subcmd__list)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        pinentry__subcmd__wukong__subcmd__help__subcmd__config__subcmd__path)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -197,7 +433,7 @@ _pinentry-wukong() {
             return 0
             ;;
         pinentry__subcmd__wukong__subcmd__serve)
-            opts="-d -D -T -N -C -M -o -g -v -q -h --debug --display --ttyname --ttytype --lc-ctype --lc-messages --timeout --no-global-grab --ui --no-keychain --verbose --quiet --log-file --help"
+            opts="-D -T -N -C -M -o -g -v -q -h --display --ttyname --ttytype --lc-ctype --lc-messages --timeout --no-global-grab --ui --verbose --quiet --debug --config --keyring --no-keyring --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -255,7 +491,7 @@ _pinentry-wukong() {
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
-                --log-file)
+                --config)
                     COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
