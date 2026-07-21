@@ -488,6 +488,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_valid() {
         assert_eq!(parse_conhost_pid("/conhost/1234"), Some(1234));
     }
@@ -498,40 +499,48 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_zero_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/0"), None);
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_overflow_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/4294967296"), None);
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_negative_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/-1"), None);
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_non_numeric_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/abc"), None);
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_empty_returns_none() {
         assert_eq!(parse_conhost_pid("/conhost/"), None);
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_wrong_prefix_returns_none() {
         assert_eq!(parse_conhost_pid("/dev/pts/0"), None);
     }
 
     #[test]
+    #[cfg(windows)]
     fn parse_conhost_pid_empty_string_returns_none() {
         assert_eq!(parse_conhost_pid(""), None);
     }
 
+    #[cfg(windows)]
     #[test]
     fn parse_conhost_pid_no_slash_prefix_returns_none() {
         assert_eq!(parse_conhost_pid("conhost/1234"), None);
