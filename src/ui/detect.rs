@@ -37,9 +37,7 @@ impl std::str::FromStr for UiMode {
 impl UiMode {
     /// Resolve to a concrete UI mode (Tui or Tty).
     ///
-    /// `Auto` → detect from terminal. `PreferTty` → try tty first. `PreferGui` → try gui first.
-    /// Since GUI is not yet supported, both `PreferTty` and `PreferGui` resolve to the
-    /// best available terminal mode.
+    /// `Auto` → detect from terminal.
     pub fn resolve(self) -> Self {
         match self {
             UiMode::Tui | UiMode::Tty => self,
@@ -49,7 +47,7 @@ impl UiMode {
 
     /// Create the UI backend for this mode.
     ///
-    /// Panics if called on an unresolved mode (Auto, PreferTty, PreferGui).
+    /// Panics if called on an unresolved mode.
     pub fn create_ui(&self) -> Box<dyn crate::ui::PinentryUi> {
         match self {
             UiMode::Tui => Box::new(super::tui::TuiUi::new()),
