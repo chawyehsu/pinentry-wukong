@@ -14,8 +14,6 @@ pub(super) struct TtyGuard {
 
 impl TtyGuard {
     pub(super) fn redirect(state: &PinentryState) -> miette::Result<Self> {
-        use std::os::unix::io::RawFd;
-
         let path = state
             .ttyname
             .clone()
