@@ -188,7 +188,7 @@ fn run_getpin(
         if let Some(t) = timeout
             && start.elapsed() >= t
         {
-            return Err(ErrorCode::CANCELED.into());
+            return Err(ErrorCode::CANCELED);
         }
 
         tracing::trace!("TUI: drawing frame");
@@ -273,7 +273,7 @@ fn run_getpin(
                 GetPinAction::Submit => {
                     return Ok(SecretBytes::from(input.into_bytes()));
                 }
-                GetPinAction::Cancel => return Err(ErrorCode::CANCELED.into()),
+                GetPinAction::Cancel => return Err(ErrorCode::CANCELED),
             }
         }
     }
@@ -365,7 +365,7 @@ fn run_confirm(
         if let Some(t) = timeout
             && start.elapsed() >= t
         {
-            return Err(ErrorCode::CANCELED.into());
+            return Err(ErrorCode::CANCELED);
         }
 
         terminal
@@ -431,7 +431,7 @@ fn run_confirm(
             .unwrap_or(Duration::from_millis(100));
         if let Some(key) = poll_key(handle, poll) {
             if key == Key::CtrlC || key == Key::Esc {
-                return Err(ErrorCode::CANCELED.into());
+                return Err(ErrorCode::CANCELED);
             }
             match focus {
                 ConfirmFocus::Ok => match key {
