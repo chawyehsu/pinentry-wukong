@@ -1,6 +1,7 @@
 use std::io::Write;
 use std::time::Instant;
 
+use assuan::ErrorCode;
 use miette::IntoDiagnostic;
 use windows_sys::Win32::Foundation::{
     CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
@@ -14,7 +15,7 @@ use windows_sys::Win32::System::Console::{
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
-use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
+use crate::state::{PinentryState, SecretBytes};
 
 /// How the Windows console was obtained.
 enum ConsoleSource {
@@ -348,73 +349,81 @@ fn read_password(
     Ok(secret)
 }
 
-pub(super) fn get_pin(state: &PinentryState) -> miette::Result<GetPinResult> {
-    let (mut writer, reader, _source) = resolve_console_handles(state)?;
+pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
+    let (mut writer, reader, _source) =
+        resolve_console_handles(state).map_err(|_| ErrorCode::GENERAL)?;
 
     if let Some(ref desc) = state.description {
-        writeln!(writer, "{desc}").into_diagnostic()?;
+        writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
     }
     if let Some(ref err) = state.error {
-        writeln!(writer, "ERROR: {err}").into_diagnostic()?;
+        writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
     }
     let prompt = &state.prompt;
-    write!(writer, "{prompt} ").into_diagnostic()?;
-    writer.flush().into_diagnostic()?;
+    write!(writer, "{prompt} ").map_err(|_| ErrorCode::GENERAL)?;
+    writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
-    let pin = read_password(&reader, &mut writer, state.timeout)?;
+    let pin = read_password(&reader, &mut writer, state.timeout).map_err(|_| ErrorCode::GENERAL)?;
 
     if pin.is_empty() {
-        return Ok(GetPinResult::Closed);
+        return Err(ErrorCode::CANCELED.into());
     }
-    Ok(GetPinResult::Pin(pin))
+    Ok(pin)
 }
 
-pub(super) fn confirm(state: &PinentryState) -> miette::Result<ConfirmResult> {
-    let (mut writer, reader, _source) = resolve_console_handles(state)?;
+pub(super) fn confirm(state: &PinentryState) -> Result<(), ErrorCode> {
+    let (mut writer, reader, _source) =
+        resolve_console_handles(state).map_err(|_| ErrorCode::GENERAL)?;
 
     if let Some(ref desc) = state.description {
-        writeln!(writer, "{desc}").into_diagnostic()?;
+        writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
     }
     if let Some(ref err) = state.error {
-        writeln!(writer, "ERROR: {err}").into_diagnostic()?;
+        writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
     }
 
     let ok_label = &state.ok;
     let cancel_label = &state.cancel;
     if state.notok.is_some() {
         let notok_label = state.notok.as_deref().unwrap_or("Not OK");
-        write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ").into_diagnostic()?;
+        write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ")
+            .map_err(|_| ErrorCode::GENERAL)?;
     } else {
-        write!(writer, "[{ok_label}] [{cancel_label}]? ").into_diagnostic()?;
+        write!(writer, "[{ok_label}] [{cancel_label}]? ").map_err(|_| ErrorCode::GENERAL)?;
     }
-    writer.flush().into_diagnostic()?;
+    writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
-    let line = reader.read_line(state.timeout)?;
+    let line = reader
+        .read_line(state.timeout)
+        .map_err(|_| ErrorCode::GENERAL)?;
 
     let input = line.trim().to_lowercase();
     match input.as_str() {
-        "" | "y" | "yes" | "ok" => Ok(ConfirmResult::Accepted),
-        "n" | "no" | "cancel" => Ok(ConfirmResult::Canceled),
+        "" | "y" | "yes" | "ok" => Ok(()),
+        "n" | "no" | "cancel" => Err(ErrorCode::CANCELED.into()),
         _ => {
             if state.notok.is_some() {
-                Ok(ConfirmResult::NotOk)
+                Err(ErrorCode::NOT_CONFIRMED.into())
             } else {
-                Ok(ConfirmResult::Canceled)
+                Err(ErrorCode::CANCELED.into())
             }
         }
     }
 }
 
-pub(super) fn message(state: &PinentryState) -> miette::Result<()> {
-    let (mut writer, reader, _source) = resolve_console_handles(state)?;
+pub(super) fn message(state: &PinentryState) -> Result<(), ErrorCode> {
+    let (mut writer, reader, _source) =
+        resolve_console_handles(state).map_err(|_| ErrorCode::GENERAL)?;
 
     if let Some(ref desc) = state.description {
-        writeln!(writer, "{desc}").into_diagnostic()?;
+        writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
     }
-    write!(writer, "[OK] ").into_diagnostic()?;
-    writer.flush().into_diagnostic()?;
+    write!(writer, "[OK] ").map_err(|_| ErrorCode::GENERAL)?;
+    writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
-    reader.read_line(state.timeout)?;
+    reader
+        .read_line(state.timeout)
+        .map_err(|_| ErrorCode::GENERAL)?;
     Ok(())
 }
 

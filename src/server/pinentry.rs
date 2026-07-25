@@ -4,7 +4,7 @@ use assuan::{self, Error, ErrorCode, Request, Response};
 
 use crate::keychain::Keychain;
 use crate::server::command::Command;
-use crate::state::{ConfirmResult, GetPinResult, PinentryState};
+use crate::state::PinentryState;
 use crate::ui::PinentryUi;
 
 /// The pinentry assuan server, which handles the Assuan protocol and
@@ -222,14 +222,11 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
         }
 
         tracing::debug!("GETPIN: prompting user via UI");
-        let result = ui
-            .get_pin(&self.state)
-            .map_err(|e| Error::new(ErrorCode::GENERAL, e.to_string()))?;
 
         self.state.error = None;
 
-        match result {
-            GetPinResult::Pin(secret) => {
+        match ui.get_pin(&self.state) {
+            Ok(secret) => {
                 if !secret.is_empty() {
                     tracing::debug!(
                         "GETPIN: passphrase entered, cache_allowed={}, keyinfo={:?}, may_cache={}",
@@ -270,12 +267,11 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
                 tracing::debug!("GETPIN: sending OK");
                 self.send(Response::OK)?;
             }
-            GetPinResult::Canceled => {
-                return Err(ErrorCode::CANCELED.into());
-            }
-            GetPinResult::Closed => {
-                self.send(Response::status("BUTTON_INFO", "close"))?;
-                return Err(ErrorCode::CANCELED.into());
+            Err(e) => {
+                if self.state.close_button {
+                    self.send(Response::status("BUTTON_INFO", "close"))?;
+                }
+                return Err(e.into());
             }
         }
 
@@ -286,19 +282,15 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
     fn handle_confirm(&mut self, ui: &dyn PinentryUi, one_button: bool) -> Result<(), Error> {
         self.state.one_button = one_button;
 
-        let result = ui
-            .confirm(&self.state)
-            .map_err(|e| Error::new(ErrorCode::GENERAL, e.to_string()))?;
-
-        match result {
-            ConfirmResult::Accepted => {
+        match ui.confirm(&self.state) {
+            Ok(()) => {
                 self.send(Response::OK)?;
             }
-            ConfirmResult::Canceled => return Err(ErrorCode::CANCELED.into()),
-            ConfirmResult::NotOk => return Err(ErrorCode::NOT_CONFIRMED.into()),
-            ConfirmResult::Closed => {
-                self.send(Response::status("BUTTON_INFO", "close"))?;
-                return Err(ErrorCode::CANCELED.into());
+            Err(e) => {
+                if self.state.close_button {
+                    self.send(Response::status("BUTTON_INFO", "close"))?;
+                }
+                return Err(e.into());
             }
         }
 
@@ -306,8 +298,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
     }
 
     fn handle_message(&mut self, ui: &dyn PinentryUi) -> Result<(), Error> {
-        ui.message(&self.state)
-            .map_err(|e| Error::new(ErrorCode::GENERAL, e.to_string()))?;
+        ui.message(&self.state)?;
         self.send(Response::OK)?;
         Ok(())
     }

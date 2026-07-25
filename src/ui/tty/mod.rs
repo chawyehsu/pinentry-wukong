@@ -3,7 +3,9 @@ mod unix;
 #[cfg(windows)]
 mod windows;
 
-use crate::state::{ConfirmResult, GetPinResult, PinentryState};
+use assuan::ErrorCode;
+
+use crate::state::{PinentryState, SecretBytes};
 use crate::ui::PinentryUi;
 
 pub struct TtyUi;
@@ -19,7 +21,7 @@ impl PinentryUi for TtyUi {
         "wukong:tty"
     }
 
-    fn get_pin(&self, state: &PinentryState) -> miette::Result<GetPinResult> {
+    fn get_pin(&self, state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
         #[cfg(unix)]
         {
             unix::get_pin(state)
@@ -30,7 +32,7 @@ impl PinentryUi for TtyUi {
         }
     }
 
-    fn confirm(&self, state: &PinentryState) -> miette::Result<ConfirmResult> {
+    fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode> {
         #[cfg(unix)]
         {
             unix::confirm(state)
@@ -41,7 +43,7 @@ impl PinentryUi for TtyUi {
         }
     }
 
-    fn message(&self, state: &PinentryState) -> miette::Result<()> {
+    fn message(&self, state: &PinentryState) -> Result<(), ErrorCode> {
         #[cfg(unix)]
         {
             unix::message(state)

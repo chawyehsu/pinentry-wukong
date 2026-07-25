@@ -1,29 +1,5 @@
 use zeroize::Zeroize;
 
-/// Result of a GETPIN operation
-#[derive(Debug)]
-pub enum GetPinResult {
-    /// User entered a passphrase
-    Pin(SecretBytes),
-    /// User canceled the operation
-    Canceled,
-    /// Window was closed
-    Closed,
-}
-
-/// Result of a CONFIRM operation
-#[derive(Debug)]
-pub enum ConfirmResult {
-    /// User accepted (OK button)
-    Accepted,
-    /// User canceled (Cancel button)
-    Canceled,
-    /// User pressed the "not ok" button
-    NotOk,
-    /// Window was closed
-    Closed,
-}
-
 /// A byte buffer that is zeroed on drop
 #[derive(Clone, Debug, Zeroize)]
 #[zeroize(drop)]
@@ -128,6 +104,11 @@ pub struct PinentryState {
     // -- Confirm mode flags --
     /// Whether this is a single-button (message) dialog
     pub one_button: bool,
+    /// Whether the window/dialog was closed (e.g. by the window manager)
+    ///
+    /// Set by the UI before returning. The server reads it to send
+    /// `BUTTON_INFO "close"` status.
+    pub close_button: bool,
 }
 
 impl Default for PinentryState {
@@ -164,6 +145,7 @@ impl PinentryState {
             quality_bar: None,
             quality_bar_tt: None,
             one_button: false,
+            close_button: false,
         }
     }
 
@@ -184,5 +166,6 @@ impl PinentryState {
         self.quality_bar_tt = None;
         self.pin_from_cache = false;
         self.may_cache_password = false;
+        self.close_button = false;
     }
 }

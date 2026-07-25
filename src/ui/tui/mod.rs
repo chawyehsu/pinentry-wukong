@@ -5,6 +5,7 @@ mod windows;
 
 use std::time::{Duration, Instant};
 
+use assuan::ErrorCode;
 use crossterm::terminal::enable_raw_mode;
 use miette::IntoDiagnostic;
 use ratatui::Terminal;
@@ -14,7 +15,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
-use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
+use crate::state::{PinentryState, SecretBytes};
 use crate::ui::PinentryUi;
 
 #[cfg(unix)]
@@ -37,44 +38,44 @@ impl PinentryUi for TuiUi {
         "wukong:tui"
     }
 
-    fn get_pin(&self, state: &PinentryState) -> miette::Result<GetPinResult> {
+    fn get_pin(&self, state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
         tracing::debug!("TUI: get_pin called");
-        let guard = TtyGuard::redirect(state)?;
+        let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         tracing::debug!("TUI: TtyGuard created, enabling raw mode");
-        let mut terminal = create_terminal()?;
+        let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
         #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         tracing::debug!("TUI: terminal created, entering get_pin loop");
         let result = run_getpin(&mut terminal, handle, state);
         tracing::debug!("TUI: get_pin loop exited with result: {:?}", result.is_ok());
-        cleanup_terminal()?;
+        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result
     }
 
-    fn confirm(&self, state: &PinentryState) -> miette::Result<ConfirmResult> {
-        let guard = TtyGuard::redirect(state)?;
-        let mut terminal = create_terminal()?;
+    fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode> {
+        let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
+        let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
         #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         let result = run_confirm(&mut terminal, handle, state);
-        cleanup_terminal()?;
+        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result
     }
 
-    fn message(&self, state: &PinentryState) -> miette::Result<()> {
-        let guard = TtyGuard::redirect(state)?;
-        let mut terminal = create_terminal()?;
+    fn message(&self, state: &PinentryState) -> Result<(), ErrorCode> {
+        let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
+        let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
         #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         let result = run_message(&mut terminal, handle, state);
-        cleanup_terminal()?;
+        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
-        result
+        result.map_err(|_| ErrorCode::GENERAL)
     }
 }
 
@@ -166,7 +167,7 @@ fn run_getpin(
     terminal: &mut TuiTerminal,
     handle: TtyHandle,
     state: &PinentryState,
-) -> miette::Result<GetPinResult> {
+) -> Result<SecretBytes, ErrorCode> {
     let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
     let description = state.description.as_deref().unwrap_or("");
     let prompt = &state.prompt;
@@ -187,7 +188,7 @@ fn run_getpin(
         if let Some(t) = timeout
             && start.elapsed() >= t
         {
-            return Ok(GetPinResult::Canceled);
+            return Err(ErrorCode::CANCELED.into());
         }
 
         tracing::trace!("TUI: drawing frame");
@@ -260,7 +261,7 @@ fn run_getpin(
                     chunks[4],
                 );
             })
-            .into_diagnostic()?;
+            .map_err(|_| ErrorCode::GENERAL)?;
 
         let poll = timeout
             .map(|t| t.saturating_sub(start.elapsed()))
@@ -270,9 +271,9 @@ fn run_getpin(
             match handle_getpin_key(key, &mut focus, &mut input) {
                 GetPinAction::Continue => {}
                 GetPinAction::Submit => {
-                    return Ok(GetPinResult::Pin(SecretBytes::from(input.into_bytes())));
+                    return Ok(SecretBytes::from(input.into_bytes()));
                 }
-                GetPinAction::Cancel => return Ok(GetPinResult::Canceled),
+                GetPinAction::Cancel => return Err(ErrorCode::CANCELED.into()),
             }
         }
     }
@@ -343,7 +344,7 @@ fn run_confirm(
     terminal: &mut TuiTerminal,
     handle: TtyHandle,
     state: &PinentryState,
-) -> miette::Result<ConfirmResult> {
+) -> Result<(), ErrorCode> {
     let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
     let description = state.description.as_deref().unwrap_or("");
     let error = state.error.as_deref();
@@ -364,7 +365,7 @@ fn run_confirm(
         if let Some(t) = timeout
             && start.elapsed() >= t
         {
-            return Ok(ConfirmResult::Canceled);
+            return Err(ErrorCode::CANCELED.into());
         }
 
         terminal
@@ -423,30 +424,30 @@ fn run_confirm(
                 ));
                 f.render_widget(Paragraph::new(Line::from(spans)), chunks[3]);
             })
-            .into_diagnostic()?;
+            .map_err(|_| ErrorCode::GENERAL)?;
 
         let poll = timeout
             .map(|t| t.saturating_sub(start.elapsed()))
             .unwrap_or(Duration::from_millis(100));
         if let Some(key) = poll_key(handle, poll) {
             if key == Key::CtrlC || key == Key::Esc {
-                return Ok(ConfirmResult::Canceled);
+                return Err(ErrorCode::CANCELED.into());
             }
             match focus {
                 ConfirmFocus::Ok => match key {
-                    Key::Enter | Key::Char(' ') => return Ok(ConfirmResult::Accepted),
+                    Key::Enter | Key::Char(' ') => return Ok(()),
                     Key::Tab | Key::Right => focus = focus.next(has_notok),
                     Key::BackTab | Key::Left => focus = ConfirmFocus::Cancel,
                     _ => {}
                 },
                 ConfirmFocus::NotOk => match key {
-                    Key::Enter | Key::Char(' ') => return Ok(ConfirmResult::NotOk),
+                    Key::Enter | Key::Char(' ') => return Err(ErrorCode::NOT_CONFIRMED.into()),
                     Key::Tab | Key::Right => focus = focus.next(has_notok),
                     Key::BackTab | Key::Left => focus = ConfirmFocus::Ok,
                     _ => {}
                 },
                 ConfirmFocus::Cancel => match key {
-                    Key::Enter | Key::Char(' ') => return Ok(ConfirmResult::Canceled),
+                    Key::Enter | Key::Char(' ') => return Err(ErrorCode::CANCELED.into()),
                     Key::Tab | Key::Right => focus = ConfirmFocus::Ok,
                     Key::BackTab | Key::Left => {
                         focus = if has_notok {
