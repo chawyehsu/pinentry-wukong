@@ -1,9 +1,10 @@
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 
+use assuan::ErrorCode;
 use miette::IntoDiagnostic;
 
-use crate::state::{ConfirmResult, GetPinResult, PinentryState, SecretBytes};
+use crate::state::{PinentryState, SecretBytes};
 use crate::ui::PinentryUi;
 
 // NOTE: rpassword is used for cross-platform password reading with echo
@@ -51,24 +52,24 @@ impl PinentryUi for TtyUi {
         "wukong:tty"
     }
 
-    fn get_pin(&self, state: &PinentryState) -> miette::Result<GetPinResult> {
+    fn get_pin(&self, state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
         let path = tty_path(state);
         let mut writer = OpenOptions::new()
             .write(true)
             .open(&path)
-            .into_diagnostic()?;
+            .map_err(|_| ErrorCode::GENERAL)?;
 
         if let Some(ref desc) = state.description {
-            writeln!(writer, "{desc}").into_diagnostic()?;
+            writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
         }
 
         if let Some(ref err) = state.error {
-            writeln!(writer, "ERROR: {err}").into_diagnostic()?;
+            writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
         }
 
         let prompt = &state.prompt;
-        write!(writer, "{prompt} ").into_diagnostic()?;
-        writer.flush().into_diagnostic()?;
+        write!(writer, "{prompt} ").map_err(|_| ErrorCode::GENERAL)?;
+        writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
         // Use rpassword with file path so it gets the fd and handles
         // echo disable/restore via termios (Unix) or SetConsoleMode (Windows).
@@ -76,24 +77,24 @@ impl PinentryUi for TtyUi {
             .input_file_path(&path)
             .output_file_path(&path)
             .build();
-        let pin = rpassword::read_password_with_config(config).into_diagnostic()?;
+        let pin = rpassword::read_password_with_config(config).map_err(|_| ErrorCode::GENERAL)?;
 
         if pin.is_empty() {
-            return Ok(GetPinResult::Closed);
+            return Err(ErrorCode::CANCELED);
         }
 
-        Ok(GetPinResult::Pin(SecretBytes::from(pin.into_bytes())))
+        Ok(SecretBytes::from(pin.into_bytes()))
     }
 
-    fn confirm(&self, state: &PinentryState) -> miette::Result<ConfirmResult> {
-        let (mut reader, mut writer) = open_tty(state)?;
+    fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode> {
+        let (mut reader, mut writer) = open_tty(state).map_err(|_| ErrorCode::GENERAL)?;
 
         if let Some(ref desc) = state.description {
-            writeln!(writer, "{desc}").into_diagnostic()?;
+            writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
         }
 
         if let Some(ref err) = state.error {
-            writeln!(writer, "ERROR: {err}").into_diagnostic()?;
+            writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
         }
 
         let ok_label = &state.ok;
@@ -101,45 +102,48 @@ impl PinentryUi for TtyUi {
 
         if state.notok.is_some() {
             let notok_label = state.notok.as_deref().unwrap_or("Not OK");
-            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ").into_diagnostic()?;
+            write!(writer, "[{ok_label}] [{notok_label}] [{cancel_label}]? ")
+                .map_err(|_| ErrorCode::GENERAL)?;
         } else {
-            write!(writer, "[{ok_label}] [{cancel_label}]? ").into_diagnostic()?;
+            write!(writer, "[{ok_label}] [{cancel_label}]? ").map_err(|_| ErrorCode::GENERAL)?;
         }
-        writer.flush().into_diagnostic()?;
+        writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
         let mut line = String::new();
         match reader.read_line(&mut line) {
-            Ok(0) => Ok(ConfirmResult::Closed),
+            Ok(0) => Err(ErrorCode::NOT_CONFIRMED),
             Ok(_) => {
                 let input = line.trim().to_lowercase();
                 match input.as_str() {
-                    "" | "y" | "yes" | "ok" => Ok(ConfirmResult::Accepted),
-                    "n" | "no" | "cancel" => Ok(ConfirmResult::Canceled),
+                    "" | "y" | "yes" | "ok" => Ok(()),
+                    "n" | "no" | "cancel" => Err(ErrorCode::CANCELED),
                     _ => {
                         if state.notok.is_some() {
-                            Ok(ConfirmResult::NotOk)
+                            Err(ErrorCode::NOT_CONFIRMED)
                         } else {
-                            Ok(ConfirmResult::Canceled)
+                            Err(ErrorCode::CANCELED)
                         }
                     }
                 }
             }
-            Err(e) => Err(miette::miette!("failed to read input: {e}")),
+            Err(_) => Err(ErrorCode::GENERAL),
         }
     }
 
-    fn message(&self, state: &PinentryState) -> miette::Result<()> {
-        let (mut reader, mut writer) = open_tty(state)?;
+    fn message(&self, state: &PinentryState) -> Result<(), ErrorCode> {
+        let (mut reader, mut writer) = open_tty(state).map_err(|_| ErrorCode::GENERAL)?;
 
         if let Some(ref desc) = state.description {
-            writeln!(writer, "{desc}").into_diagnostic()?;
+            writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
         }
 
-        write!(writer, "[OK] ").into_diagnostic()?;
-        writer.flush().into_diagnostic()?;
+        write!(writer, "[OK] ").map_err(|_| ErrorCode::GENERAL)?;
+        writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
         let mut line = String::new();
-        reader.read_line(&mut line).into_diagnostic()?;
+        reader
+            .read_line(&mut line)
+            .map_err(|_| ErrorCode::GENERAL)?;
 
         Ok(())
     }

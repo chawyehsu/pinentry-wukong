@@ -2,7 +2,9 @@ pub mod detect;
 pub mod tty;
 pub mod tui;
 
-use crate::state::{ConfirmResult, GetPinResult, PinentryState};
+use assuan::ErrorCode;
+
+use crate::state::{PinentryState, SecretBytes};
 
 /// Trait for pinentry UI
 ///
@@ -13,11 +15,11 @@ pub trait PinentryUi {
     fn flavor(&self) -> &str;
 
     /// Prompt the user for a passphrase
-    fn get_pin(&self, state: &PinentryState) -> miette::Result<GetPinResult>;
+    fn get_pin(&self, state: &PinentryState) -> Result<SecretBytes, ErrorCode>;
 
     /// Show a confirmation dialog (OK / Cancel / Not-OK)
-    fn confirm(&self, state: &PinentryState) -> miette::Result<ConfirmResult>;
+    fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode>;
 
     /// Show a one-button message dialog
-    fn message(&self, state: &PinentryState) -> miette::Result<()>;
+    fn message(&self, state: &PinentryState) -> Result<(), ErrorCode>;
 }
