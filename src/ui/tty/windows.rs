@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::time::Instant;
 
 use miette::IntoDiagnostic;
 use windows_sys::Win32::Foundation::{
@@ -8,9 +9,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{
-    AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
-    FreeConsole, GetConsoleMode, GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
-    SetConsoleMode, WriteConsoleW,
+    AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_PROCESSED_INPUT, FreeConsole, GetConsoleMode,
+    GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode, WriteConsoleW,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
@@ -102,12 +102,24 @@ impl ConsoleHandle {
     }
 
     /// Read a line into raw bytes, handling backspace. Reads until Enter.
+    ///
+    /// Temporarily disables `ENABLE_LINE_INPUT` so `ReadConsoleW` returns
+    /// characters one at a time (the loop handles backspace/Enter itself).
+    /// This lets `wait_for_input` drive the timeout — with line input
+    /// enabled, `ReadConsoleW` would block until Enter, making
+    /// `wait_for_input` burn the entire timeout before any character is read.
     fn read_line_bytes(&self, timeout_secs: u32) -> miette::Result<Vec<u8>> {
         let handle = self.raw();
+        let deadline = if timeout_secs > 0 {
+            Some(Instant::now() + std::time::Duration::from_secs(timeout_secs as u64))
+        } else {
+            None
+        };
+        let _mode_guard = self.set_mode(ENABLE_PROCESSED_INPUT)?;
         let mut buf = Vec::new();
         let mut pending_high: Option<u16> = None;
         loop {
-            if !wait_for_input(handle, timeout_secs)? {
+            if !wait_for_input(handle, deadline)? {
                 break;
             }
             let mut wide: [u16; 1] = [0];
@@ -205,12 +217,15 @@ impl Write for ConsoleHandle {
 
 /// Wait for input to become available on a console handle.
 ///
-/// Returns `true` if input is ready, `false` if the timeout elapsed.
-fn wait_for_input(handle: HANDLE, timeout_secs: u32) -> miette::Result<bool> {
-    let ms = if timeout_secs == 0 {
-        0xFFFFFFFF // INFINITE
-    } else {
-        timeout_secs * 1000
+/// Returns `true` if input is ready, `false` if the deadline passed.
+/// A `None` deadline waits indefinitely.
+fn wait_for_input(handle: HANDLE, deadline: Option<Instant>) -> miette::Result<bool> {
+    let ms = match deadline {
+        Some(d) => {
+            let remaining = d.saturating_duration_since(Instant::now());
+            remaining.as_millis() as u32
+        }
+        None => 0xFFFFFFFF, // INFINITE
     };
     match unsafe { WaitForSingleObject(handle, ms) } {
         WAIT_OBJECT_0 => Ok(true),
@@ -325,12 +340,7 @@ fn read_password(
     writer: &mut ConsoleHandle,
     timeout_secs: u32,
 ) -> miette::Result<SecretBytes> {
-    let new_mode = ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT;
-
-    let secret = {
-        let _guard = reader.set_mode(new_mode)?;
-        SecretBytes::from(reader.read_line_bytes(timeout_secs)?)
-    };
+    let secret = SecretBytes::from(reader.read_line_bytes(timeout_secs)?);
 
     // Echo was disabled, so the user's Enter didn't produce a visible newline
     writeln!(writer).into_diagnostic()?;
