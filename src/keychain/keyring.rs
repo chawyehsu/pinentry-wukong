@@ -34,14 +34,8 @@ impl Keychain for KeyringKeychain {
             }
         };
         match entry.get_password() {
-            Ok(password) => {
-                tracing::info!("keychain hit: account={keygrip}");
-                Some(SecretBytes::from(password.into_bytes()))
-            }
-            Err(keyring::Error::NoEntry) => {
-                tracing::debug!("keychain miss: no entry for {keygrip}");
-                None
-            }
+            Ok(password) => Some(SecretBytes::from(password.into_bytes())),
+            Err(keyring::Error::NoEntry) => None,
             Err(e) => {
                 tracing::debug!("keychain lookup failed for key {keygrip}: {e}");
                 None
