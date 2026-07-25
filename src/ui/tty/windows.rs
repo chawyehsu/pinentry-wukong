@@ -2,7 +2,6 @@ use std::io::Write;
 use std::time::Instant;
 
 use assuan::ErrorCode;
-use miette::IntoDiagnostic;
 use windows_sys::Win32::Foundation::{
     CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
@@ -11,7 +10,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Console::{
     AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_PROCESSED_INPUT, FreeConsole, GetConsoleMode,
-    GetStdHandle, ReadConsoleW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode, WriteConsoleW,
+    GetStdHandle, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD, ReadConsoleInputW, STD_INPUT_HANDLE,
+    STD_OUTPUT_HANDLE, SetConsoleMode, WriteConsoleW,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
@@ -80,12 +80,16 @@ impl ConsoleHandle {
     }
 
     /// Change the console mode, returning a guard that restores the original on drop.
-    fn set_mode(&self, mode: CONSOLE_MODE) -> miette::Result<ConsoleModeGuard> {
+    fn set_mode(
+        &self,
+        f: impl FnOnce(CONSOLE_MODE) -> CONSOLE_MODE,
+    ) -> miette::Result<ConsoleModeGuard> {
         let handle = self.raw();
         let mut original_mode: CONSOLE_MODE = 0;
         if unsafe { GetConsoleMode(handle, &mut original_mode) } == 0 {
             return Err(miette::miette!("GetConsoleMode failed on console handle"));
         }
+        let mode = f(original_mode);
         if unsafe { SetConsoleMode(handle, mode) } == 0 {
             return Err(miette::miette!("SetConsoleMode failed"));
         }
@@ -96,57 +100,91 @@ impl ConsoleHandle {
     }
 
     /// Read a line from the console, handling backspace. Reads until Enter.
-    fn read_line(&self, timeout_secs: u32) -> miette::Result<String> {
+    fn read_line(&self, timeout_secs: u32) -> Result<String, ErrorCode> {
         let bytes = self.read_line_bytes(timeout_secs)?;
-        String::from_utf8(bytes)
-            .map_err(|e| miette::miette!("console input was not valid UTF-8: {e}"))
+        String::from_utf8(bytes).map_err(|_| ErrorCode::GENERAL)
     }
 
     /// Read a line into raw bytes, handling backspace. Reads until Enter.
     ///
-    /// Temporarily disables `ENABLE_LINE_INPUT` so `ReadConsoleW` returns
-    /// characters one at a time (the loop handles backspace/Enter itself).
-    /// This lets `wait_for_input` drive the timeout — with line input
-    /// enabled, `ReadConsoleW` would block until Enter, making
-    /// `wait_for_input` burn the entire timeout before any character is read.
-    fn read_line_bytes(&self, timeout_secs: u32) -> miette::Result<Vec<u8>> {
+    /// Uses `ReadConsoleInputW` to read raw input records, filtering for
+    /// actual key events. This avoids spurious wakeups from non-key events
+    /// (mouse, focus, resize) that `WaitForSingleObject` on a console handle
+    /// can produce, which would cause `ReadConsoleW` to block past the
+    /// deadline.
+    ///
+    /// `ENABLE_PROCESSED_INPUT` is disabled so Ctrl+C arrives as a key event
+    /// rather than terminating the process.
+    fn read_line_bytes(&self, timeout_secs: u32) -> Result<Vec<u8>, ErrorCode> {
         let handle = self.raw();
-        let deadline = if timeout_secs > 0 {
-            Some(Instant::now() + std::time::Duration::from_secs(timeout_secs as u64))
+
+        // Disable ENABLE_PROCESSED_INPUT so Ctrl+C is delivered as a key
+        // event rather than a signal that terminates the process.
+        let _mode_guard = self
+            .set_mode(|m| m & !ENABLE_PROCESSED_INPUT)
+            .map_err(|_| ErrorCode::GENERAL)?;
+
+        let timeout = if timeout_secs > 0 {
+            Some(std::time::Duration::from_secs(timeout_secs as u64))
         } else {
             None
         };
-        let _mode_guard = self.set_mode(ENABLE_PROCESSED_INPUT)?;
+        let mut deadline = timeout.map(|t| Instant::now() + t);
+
         let mut buf = Vec::new();
         let mut pending_high: Option<u16> = None;
         loop {
-            if !wait_for_input(handle, deadline)? {
-                break;
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Err(ErrorCode::TIMEOUT);
+                }
+                let remaining = d.saturating_duration_since(Instant::now());
+                let ms = remaining.as_millis() as u32;
+                match unsafe { WaitForSingleObject(handle, ms) } {
+                    WAIT_OBJECT_0 => {}
+                    WAIT_TIMEOUT => {
+                        if Instant::now() >= d {
+                            return Err(ErrorCode::TIMEOUT);
+                        }
+                        continue;
+                    }
+                    _ => return Err(ErrorCode::GENERAL),
+                }
             }
-            let mut wide: [u16; 1] = [0];
-            let mut chars_read: u32 = 0;
-            if unsafe {
-                ReadConsoleW(
-                    handle,
-                    wide.as_mut_ptr() as *mut _,
-                    1,
-                    &mut chars_read,
-                    std::ptr::null(),
-                )
-            } == 0
-            {
-                return Err(miette::miette!("ReadConsoleW failed"));
+
+            let mut record: INPUT_RECORD = unsafe { std::mem::zeroed() };
+            let mut events_read: u32 = 0;
+            if unsafe { ReadConsoleInputW(handle, &mut record, 1, &mut events_read) } == 0 {
+                return Err(ErrorCode::GENERAL);
             }
-            if chars_read == 0 {
-                break;
+            if events_read == 0 {
+                continue;
             }
-            match wide[0] {
+
+            if record.EventType != KEY_EVENT as u16 {
+                continue;
+            }
+
+            let key: KEY_EVENT_RECORD = unsafe { record.Event.KeyEvent };
+            if key.bKeyDown == 0 {
+                continue;
+            }
+
+            let c = unsafe { key.uChar.UnicodeChar };
+
+            // Ctrl+C (ETX, U+0003)
+            if c == 0x0003 {
+                return Err(ErrorCode::CANCELED);
+            }
+
+            // A valid keypress resets the idle timeout.
+            deadline = timeout.map(|t| Instant::now() + t);
+
+            match c {
                 0x000D | 0x000A => break,
                 0x0008 | 0x007F => {
                     pending_high = None;
-                    // Backspace: remove last UTF-8 byte sequence
                     if !buf.is_empty() {
-                        // Walk back to find start of last char
                         let mut i = buf.len() - 1;
                         while i > 0 && (buf[i] & 0xC0) == 0x80 {
                             i -= 1;
@@ -158,17 +196,18 @@ impl ConsoleHandle {
                     pending_high = Some(c);
                 }
                 c if (0xDC00..=0xDFFF).contains(&c) => {
-                    if let Some(high) = pending_high.take() {
-                        if let Some(ch) = char::decode_utf16([high, c]).next().and_then(|r| r.ok())
-                        {
-                            let mut tmp = [0u8; 4];
-                            buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
-                        }
+                    if let Some(high) = pending_high.take()
+                        && let Some(ch) = char::decode_utf16([high, c]).next().and_then(|r| r.ok())
+                    {
+                        let mut tmp = [0u8; 4];
+                        buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
                     }
                 }
                 c => {
                     pending_high = None;
-                    if let Some(ch) = char::from_u32(c as u32) {
+                    if c != 0
+                        && let Some(ch) = char::from_u32(c as u32)
+                    {
                         let mut tmp = [0u8; 4];
                         buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
                     }
@@ -215,26 +254,6 @@ impl Write for ConsoleHandle {
         Ok(())
     }
 }
-
-/// Wait for input to become available on a console handle.
-///
-/// Returns `true` if input is ready, `false` if the deadline passed.
-/// A `None` deadline waits indefinitely.
-fn wait_for_input(handle: HANDLE, deadline: Option<Instant>) -> miette::Result<bool> {
-    let ms = match deadline {
-        Some(d) => {
-            let remaining = d.saturating_duration_since(Instant::now());
-            remaining.as_millis() as u32
-        }
-        None => 0xFFFFFFFF, // INFINITE
-    };
-    match unsafe { WaitForSingleObject(handle, ms) } {
-        WAIT_OBJECT_0 => Ok(true),
-        WAIT_TIMEOUT => Ok(false),
-        _ => Err(miette::miette!("WaitForSingleObject failed")),
-    }
-}
-
 /// Parse a `/conhost/<pid>` ttyname value, returning the PID if valid.
 fn parse_conhost_pid(ttyname: &str) -> Option<u32> {
     let pid_str = ttyname.strip_prefix("/conhost/")?;
