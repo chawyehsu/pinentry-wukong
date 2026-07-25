@@ -217,6 +217,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
                 self.send(Response::status("PASSWORD_FROM_CACHE", ""))?;
                 self.send(Response::data(cached.as_bytes().to_vec()))?;
                 self.send(Response::OK)?;
+                self.state.repeat_passphrase = None;
                 return Ok(());
             }
         }
