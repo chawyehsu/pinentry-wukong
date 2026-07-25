@@ -441,13 +441,13 @@ fn run_confirm(
                     _ => {}
                 },
                 ConfirmFocus::NotOk => match key {
-                    Key::Enter | Key::Char(' ') => return Err(ErrorCode::NOT_CONFIRMED.into()),
+                    Key::Enter | Key::Char(' ') => return Err(ErrorCode::NOT_CONFIRMED),
                     Key::Tab | Key::Right => focus = focus.next(has_notok),
                     Key::BackTab | Key::Left => focus = ConfirmFocus::Ok,
                     _ => {}
                 },
                 ConfirmFocus::Cancel => match key {
-                    Key::Enter | Key::Char(' ') => return Err(ErrorCode::CANCELED.into()),
+                    Key::Enter | Key::Char(' ') => return Err(ErrorCode::CANCELED),
                     Key::Tab | Key::Right => focus = ConfirmFocus::Ok,
                     Key::BackTab | Key::Left => {
                         focus = if has_notok {

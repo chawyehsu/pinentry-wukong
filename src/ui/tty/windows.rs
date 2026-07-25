@@ -340,11 +340,11 @@ fn read_password(
     reader: &ConsoleHandle,
     writer: &mut ConsoleHandle,
     timeout_secs: u32,
-) -> miette::Result<SecretBytes> {
+) -> Result<SecretBytes, ErrorCode> {
     let secret = SecretBytes::from(reader.read_line_bytes(timeout_secs)?);
 
     // Echo was disabled, so the user's Enter didn't produce a visible newline
-    writeln!(writer).into_diagnostic()?;
+    writeln!(writer).map_err(|_| ErrorCode::GENERAL)?;
 
     Ok(secret)
 }
@@ -363,10 +363,10 @@ pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
     write!(writer, "{prompt} ").map_err(|_| ErrorCode::GENERAL)?;
     writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
-    let pin = read_password(&reader, &mut writer, state.timeout).map_err(|_| ErrorCode::GENERAL)?;
+    let pin = read_password(&reader, &mut writer, state.timeout)?;
 
     if pin.is_empty() {
-        return Err(ErrorCode::CANCELED.into());
+        return Err(ErrorCode::CANCELED);
     }
     Ok(pin)
 }
@@ -393,19 +393,17 @@ pub(super) fn confirm(state: &PinentryState) -> Result<(), ErrorCode> {
     }
     writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
-    let line = reader
-        .read_line(state.timeout)
-        .map_err(|_| ErrorCode::GENERAL)?;
+    let line = reader.read_line(state.timeout)?;
 
     let input = line.trim().to_lowercase();
     match input.as_str() {
         "" | "y" | "yes" | "ok" => Ok(()),
-        "n" | "no" | "cancel" => Err(ErrorCode::CANCELED.into()),
+        "n" | "no" | "cancel" => Err(ErrorCode::CANCELED),
         _ => {
             if state.notok.is_some() {
-                Err(ErrorCode::NOT_CONFIRMED.into())
+                Err(ErrorCode::NOT_CONFIRMED)
             } else {
-                Err(ErrorCode::CANCELED.into())
+                Err(ErrorCode::CANCELED)
             }
         }
     }
@@ -421,9 +419,7 @@ pub(super) fn message(state: &PinentryState) -> Result<(), ErrorCode> {
     write!(writer, "[OK] ").map_err(|_| ErrorCode::GENERAL)?;
     writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
-    reader
-        .read_line(state.timeout)
-        .map_err(|_| ErrorCode::GENERAL)?;
+    reader.read_line(state.timeout)?;
     Ok(())
 }
 
