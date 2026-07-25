@@ -48,7 +48,7 @@ impl PinentryUi for TuiUi {
         tracing::debug!("TUI: terminal created, entering get_pin loop");
         let result = run_getpin(&mut terminal, handle, state);
         tracing::debug!("TUI: get_pin loop exited with result: {:?}", result.is_ok());
-        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result
@@ -60,7 +60,7 @@ impl PinentryUi for TuiUi {
         #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         let result = run_confirm(&mut terminal, handle, state);
-        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result
@@ -72,7 +72,7 @@ impl PinentryUi for TuiUi {
         #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         let result = run_message(&mut terminal, handle, state);
-        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result

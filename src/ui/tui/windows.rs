@@ -26,7 +26,7 @@ impl Drop for TtyGuard {
     }
 }
 
-pub(super) fn cleanup_terminal() -> miette::Result<()> {
+pub(super) fn cleanup_terminal(_handle: ()) -> miette::Result<()> {
     disable_raw_mode().into_diagnostic()?;
     // On Windows, crossterm handles terminal cleanup via the Console API.
     // The escape sequences are processed by the Windows terminal directly.

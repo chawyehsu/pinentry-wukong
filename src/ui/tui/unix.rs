@@ -92,20 +92,17 @@ impl Drop for TtyGuard {
     }
 }
 
-pub(super) fn cleanup_terminal() -> miette::Result<()> {
+pub(super) fn cleanup_terminal(tty_fd: std::os::unix::io::RawFd) -> miette::Result<()> {
     disable_raw_mode().into_diagnostic()?;
     // On Unix, write escape sequences directly to the TTY to ensure they
     // reach the terminal even if stdout has been redirected.
-    use std::io::Write;
-    let mut tty = std::fs::OpenOptions::new()
-        .write(true)
-        .open("/dev/tty")
-        .into_diagnostic()?;
-    tty.write_all(b"\x1b[?1049l").ok(); // leave alternate screen
-    tty.write_all(b"\x1b[?25h").ok(); // show cursor
-    tty.write_all(b"\x1b[r").ok(); // reset scroll region
-    tty.write_all(b"\x1b[999;1H").ok(); // move cursor to bottom
-    tty.write_all(b"\n").ok();
+    unsafe {
+        libc::write(tty_fd, b"\x1b[?1049l".as_ptr().cast(), 8); // leave alternate screen
+        libc::write(tty_fd, b"\x1b[?25h".as_ptr().cast(), 6); // show cursor
+        libc::write(tty_fd, b"\x1b[r".as_ptr().cast(), 3); // reset scroll region
+        libc::write(tty_fd, b"\x1b[999;1H".as_ptr().cast(), 10); // move cursor to bottom
+        libc::write(tty_fd, b"\n".as_ptr().cast(), 1);
+    }
     Ok(())
 }
 
