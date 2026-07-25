@@ -75,7 +75,7 @@ impl PinentryUi for TuiUi {
         cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
-        result.map_err(|_| ErrorCode::GENERAL)
+        result
     }
 }
 
@@ -469,7 +469,7 @@ fn run_message(
     terminal: &mut TuiTerminal,
     handle: TtyHandle,
     state: &PinentryState,
-) -> miette::Result<()> {
+) -> Result<(), ErrorCode> {
     let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
     let description = state.description.as_deref().unwrap_or("");
     let ok_label = &state.ok;
@@ -512,7 +512,7 @@ fn run_message(
                     chunks[2],
                 );
             })
-            .into_diagnostic()?;
+            .map_err(|_| ErrorCode::GENERAL)?;
 
         if let Some(Key::Enter | Key::Esc | Key::Char(' ') | Key::CtrlC) =
             poll_key(handle, Duration::from_millis(100))
