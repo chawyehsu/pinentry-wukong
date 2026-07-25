@@ -105,6 +105,7 @@ impl ConsoleHandle {
     fn read_line_bytes(&self, timeout_secs: u32) -> miette::Result<Vec<u8>> {
         let handle = self.raw();
         let mut buf = Vec::new();
+        let mut pending_high: Option<u16> = None;
         loop {
             if !wait_for_input(handle, timeout_secs)? {
                 break;
@@ -129,6 +130,7 @@ impl ConsoleHandle {
             match wide[0] {
                 0x000D | 0x000A => break,
                 0x0008 | 0x007F => {
+                    pending_high = None;
                     // Backspace: remove last UTF-8 byte sequence
                     if !buf.is_empty() {
                         // Walk back to find start of last char
@@ -139,7 +141,20 @@ impl ConsoleHandle {
                         buf.truncate(i);
                     }
                 }
+                c if (0xD800..=0xDBFF).contains(&c) => {
+                    pending_high = Some(c);
+                }
+                c if (0xDC00..=0xDFFF).contains(&c) => {
+                    if let Some(high) = pending_high.take() {
+                        if let Some(ch) = char::decode_utf16([high, c]).next().and_then(|r| r.ok())
+                        {
+                            let mut tmp = [0u8; 4];
+                            buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
+                        }
+                    }
+                }
                 c => {
+                    pending_high = None;
                     if let Some(ch) = char::from_u32(c as u32) {
                         let mut tmp = [0u8; 4];
                         buf.extend_from_slice(ch.encode_utf8(&mut tmp).as_bytes());
