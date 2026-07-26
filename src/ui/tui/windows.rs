@@ -35,11 +35,12 @@ impl TtyGuard {
 
         let (saved_stdin, saved_stdout) = redirect_std_to_console(&reader, &writer)?;
 
-        // Disable echo and line input on CONIN$ BEFORE anything reads from it.
-        // This prevents the console from echoing keystrokes while the TUI
-        // draws masked input characters.
+        // Disable echo, line input, and processed input on CONIN$.
+        // Clearing ENABLE_PROCESSED_INPUT ensures Ctrl+C arrives as a
+        // KEY_EVENT for poll_key rather than terminating the process.
+        // cleanup_terminal restores all three flags on exit.
         let mode_guard = reader
-            .set_mode(|m| m & !ENABLE_ECHO_INPUT & !ENABLE_LINE_INPUT)
+            .set_mode(|m| m & !ENABLE_ECHO_INPUT & !ENABLE_LINE_INPUT & !ENABLE_PROCESSED_INPUT)
             .map_err(|_| miette::miette!("failed to set console mode"))?;
 
         let conin = reader.raw();
