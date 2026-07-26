@@ -83,7 +83,7 @@ impl TryFrom<Request> for Command {
             }
             "CLEARPASSPHRASE" => {
                 if args.is_empty() {
-                    Err(Error::new(ErrorCode::INV_PARAMETER, "empty key"))
+                    Err(ErrorCode::ASS_INV_VALUE.into())
                 } else {
                     Ok(Command::ClearPassphrase(args))
                 }
@@ -104,14 +104,8 @@ impl TryFrom<Request> for Command {
 
             // Timeout
             "SETTIMEOUT" => {
-                if args.is_empty() {
-                    Ok(Command::SetTimeout(0))
-                } else {
-                    let secs = args
-                        .parse::<u32>()
-                        .map_err(|_| Error::new(ErrorCode::INV_PARAMETER, "invalid timeout"))?;
-                    Ok(Command::SetTimeout(secs))
-                }
+                let secs = args.parse::<u32>().unwrap_or_default();
+                Ok(Command::SetTimeout(secs))
             }
 
             // Actions

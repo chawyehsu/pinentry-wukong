@@ -315,7 +315,7 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
                 let display = self.state.display.as_deref().unwrap_or("-");
                 format!("{ttyname} {ttytype} {display} - -")
             }
-            _ => return Err(ErrorCode::INV_PARAMETER.into()),
+            _ => return Err(ErrorCode::ASS_PARAMETER.into()),
         };
 
         self.send(Response::data(data.into_bytes()))?;

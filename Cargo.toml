@@ -13,7 +13,7 @@ name = "pinentry-wukong"
 path = "src/main.rs"
 
 [dependencies]
-assuan = "0.1"
+assuan = "0.3"
 clap = { version = "4.5", features = ["derive"] }
 clap-verbosity-flag = { version = "3.0.4", features = ["tracing"] }
 clap_complete = "4.5.66"

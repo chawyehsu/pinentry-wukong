@@ -98,9 +98,9 @@ dependencies = [
 
 [[package]]
 name = "assuan"
-version = "0.1.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "882e4205b07172c388d208aa816d627c183e5a22d898b33ad2e38fb6155dbebc"
+checksum = "63033948c249503d282c946134d46c4eb4f96cb07c1294f994eada685adf991b"
 dependencies = [
  "thiserror",
 ]
