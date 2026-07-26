@@ -39,6 +39,24 @@ Set pinentry-wukong as your pinentry program in `~/.gnupg/gpg-agent.conf`:
 pinentry-program /path/to/pinentry-wukong
 ```
 
+Make sure to set the `GPG_TTY` environment variable in your shell configuration (e.g., `~/.bashrc`, `~/.zshrc`):
+
+```sh
+export GPG_TTY=$(tty)
+```
+
+for PowerShell on macOS/Linux:
+
+```powershell
+$env:GPG_TTY = $(tty)
+```
+
+for PowerShell on Windows:
+
+```powershell
+$env:GPG_TTY = "/conhost/$PID"
+```
+
 Then restart gpg-agent:
 
 ```sh
