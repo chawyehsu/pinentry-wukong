@@ -9,7 +9,7 @@
 
 ## What is pinentry?
 
-Pinentry is a passphrase dialog invoked by [gpg-agent](https://gnupg.org/documentation/manuals/gnupg/Agent-Options.html) when GPG operations require a secret key. The standard pinentry implementations (pinentry-gtk2, pinentry-qt, pinentry-curses, pinentry-tty, pinentry-w32) are written in C and platform-specific.
+Pinentry is a passphrase dialog invoked by `gpg-agent` when GPG operations require a secret key. The standard pinentry implementations (pinentry-gtk2, pinentry-qt, pinentry-curses, pinentry-tty, pinentry-w32) are written in C and platform-specific.
 
 **pinentry-wukong** replaces all of them with a single Rust binary that:
 
@@ -31,9 +31,9 @@ cargo install --locked pinentry-wukong
 
 Check the [releases](https://github.com/chawyehsu/pinentry-wukong/releases) page.
 
-## Configuration
+## Integration with GnuPG
 
-Set pinentry-wukong as your pinentry program in `~/.gnupg/gpg-agent.conf`:
+Set **pinentry-wukong** as your pinentry program in `~/.gnupg/gpg-agent.conf`:
 
 ```plain
 pinentry-program /path/to/pinentry-wukong
@@ -57,7 +57,7 @@ for PowerShell on Windows:
 $env:GPG_TTY = "/conhost/$PID"
 ```
 
-Then restart gpg-agent:
+`GPG_TTY` is required for TTY mode to work properly. Then restart `gpg-agent`:
 
 ```sh
 gpgconf --kill gpg-agent
@@ -65,17 +65,16 @@ gpgconf --kill gpg-agent
 
 ## Usage
 
-pinentry-wukong is designed to be invoked by gpg-agent automatically. You can also test it manually:
+**pinentry-wukong** is designed to be invoked by `gpg-agent` automatically. Most of the time, you don't need to run it manually. However, you can play with it interactively for testing purposes:
 
 ```sh
-# Interactive TUI mode
-echo -e "SETDESC Enter passphrase to unlock key ABC123\nSETPROMPT Passphrase:\nGETPIN" | pinentry-wukong
-
-# Force TTY fallback mode
-echo -e "GETPIN" | pinentry-wukong --ui=tty
+# Run the pinentry server in the foreground
+pinentry-wukong
 ```
 
 ### CLI options
+
+**pinentry-wukong** supports most of the command-line options of the original pinentry implementations. It also has a few additional unique options for better experience.
 
 ```console
 Usage: pinentry-wukong [OPTIONS] [COMMAND]
@@ -105,25 +104,7 @@ Options:
   -V, --version               Print version
 ```
 
-## Supported Assuan Commands
-
-| Command | Status | Description |
-| --------- | -------- | ------------- |
-| `SETDESC` | ✅ | Set description text |
-| `SETPROMPT` | ✅ | Set prompt label |
-| `SETERROR` | ✅ | Set error message |
-| `SETTITLE` | ✅ | Set window title |
-| `SETOK` / `SETCANCEL` / `SETNOTOK` | ✅ | Set button labels |
-| `GETPIN` | ✅ | Get passphrase from user |
-| `CONFIRM` | ✅ | Show confirmation dialog |
-| `MESSAGE` | ✅ | Show one-button message |
-| `GETINFO` | ✅ | Return version/pid/flavor |
-| `OPTION` | ✅ | Set session options |
-| `SETKEYINFO` | ✅ | Set key identifier for caching |
-| `CLEARPASSPHRASE` | ✅ | Clear cached passphrase |
-| `SETQUALITYBAR` | 🔜 | Quality indicator (post-MVP) |
-| `SETREPEAT` | 🔜 | Repeat passphrase (post-MVP) |
-| `INQUIRE` | 🔜 | Callbacks to gpg-agent (post-MVP) |
+For example, you can use `pinentry-wukong config` subcommands to manage the configuration file.
 
 ## Security
 
