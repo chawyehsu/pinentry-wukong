@@ -7,9 +7,10 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{
-    AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_PROCESSED_INPUT, FreeConsole, GetConsoleMode,
-    GetStdHandle, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD, ReadConsoleInputW, STD_INPUT_HANDLE,
-    STD_OUTPUT_HANDLE, SetConsoleMode, WriteConsoleW,
+    AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_PROCESSED_INPUT, FlushConsoleInputBuffer,
+    FreeConsole, GetConsoleMode, GetStdHandle, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD,
+    ReadConsoleInputW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode, SetStdHandle,
+    WriteConsoleW,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
@@ -348,6 +349,41 @@ pub(super) fn resolve_console_handles(
     let writer = open_console_handle(&source, "CONOUT$", 0x40000000)?;
     let reader = open_console_handle(&source, "CONIN$", 0xC0000000)?;
     Ok((writer, reader, source))
+}
+
+/// Save the current std handles (Assuan pipe handles) and redirect them to
+/// the console. Returns the saved handles for restoration on drop.
+///
+/// After this call, `GetStdHandle(STD_INPUT_HANDLE)` returns the CONIN$
+/// file handle, so crossterm reads/writes the console automatically.
+///
+/// Also flushes the console input buffer to discard any stale events
+/// (e.g. previous keystrokes from the user's shell) that would otherwise
+/// be read as immediate input by the TUI.
+pub(super) fn redirect_std_to_console(
+    conin: &ConsoleHandle,
+    conout: &ConsoleHandle,
+) -> miette::Result<(HANDLE, HANDLE)> {
+    let saved_stdin = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
+    let saved_stdout = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+
+    unsafe { SetStdHandle(STD_INPUT_HANDLE, conin.raw()) };
+    unsafe { SetStdHandle(STD_OUTPUT_HANDLE, conout.raw()) };
+
+    // Discard any stale input events already queued in the console buffer.
+    // Without this, crossterm may read previous keystrokes from the user's
+    // shell session and immediately return them as TUI input.
+    unsafe { FlushConsoleInputBuffer(conin.raw()) };
+
+    tracing::debug!("TUI: redirected std handles to console");
+    Ok((saved_stdin, saved_stdout))
+}
+
+/// Restore previously saved std handles (Assuan pipe handles).
+pub(super) fn restore_std_handles(saved_stdin: HANDLE, saved_stdout: HANDLE) {
+    unsafe { SetStdHandle(STD_INPUT_HANDLE, saved_stdin) };
+    unsafe { SetStdHandle(STD_OUTPUT_HANDLE, saved_stdout) };
+    tracing::debug!("TUI: restored std handles to Assuan pipes");
 }
 
 #[cfg(test)]

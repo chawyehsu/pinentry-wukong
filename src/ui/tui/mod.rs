@@ -6,6 +6,7 @@ mod windows;
 use std::time::{Duration, Instant};
 
 use assuan::ErrorCode;
+#[cfg(unix)]
 use crossterm::terminal::enable_raw_mode;
 use miette::IntoDiagnostic;
 use ratatui::Terminal;
@@ -21,7 +22,7 @@ use crate::ui::PinentryUi;
 #[cfg(unix)]
 type TtyHandle = std::os::unix::io::RawFd;
 #[cfg(windows)]
-type TtyHandle = ();
+type TtyHandle = windows_sys::Win32::Foundation::HANDLE;
 
 type TuiTerminal = Terminal<CrosstermBackend<std::io::Stdout>>;
 
@@ -43,7 +44,6 @@ impl PinentryUi for TuiUi {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         tracing::debug!("TUI: TtyGuard created, enabling raw mode");
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
-        #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         tracing::debug!("TUI: terminal created, entering get_pin loop");
         let result = run_getpin(&mut terminal, handle, state);
@@ -57,7 +57,6 @@ impl PinentryUi for TuiUi {
     fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode> {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
-        #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         let result = run_confirm(&mut terminal, handle, state);
         cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
@@ -69,7 +68,6 @@ impl PinentryUi for TuiUi {
     fn message(&self, state: &PinentryState) -> Result<(), ErrorCode> {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
-        #[allow(clippy::let_unit_value)]
         let handle = guard.handle();
         let result = run_message(&mut terminal, handle, state);
         cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
@@ -89,6 +87,12 @@ use windows::{TtyGuard, cleanup_terminal, poll_key};
 // -- Terminal setup --
 
 fn create_terminal() -> miette::Result<TuiTerminal> {
+    // On Windows, the TtyGuard manages the console mode (disables echo and
+    // line input on CONIN$). We skip enable_raw_mode here because crossterm
+    // would set it on STD_INPUT_HANDLE, which is CONIN$ — but we read input
+    // directly via ReadConsoleInputW, not through crossterm's event system.
+    // The guard's ConsoleModeGuard restores the mode on drop.
+    #[cfg(unix)]
     enable_raw_mode().into_diagnostic()?;
     let backend = CrosstermBackend::new(std::io::stdout());
     let mut terminal = Terminal::new(backend).into_diagnostic()?;
@@ -100,6 +104,7 @@ fn create_terminal() -> miette::Result<TuiTerminal> {
 
 /// A parsed key event from terminal input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Left/Right used on Unix
 enum Key {
     Char(char),
     Enter,
@@ -191,7 +196,6 @@ fn run_getpin(
             return Err(ErrorCode::CANCELED);
         }
 
-        tracing::trace!("TUI: drawing frame");
         terminal
             .draw(|f| {
                 let area = centered_rect(60, 12, f.area());
