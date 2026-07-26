@@ -1,6 +1,8 @@
 pub mod detect;
 pub mod tty;
 pub mod tui;
+#[cfg(windows)]
+pub mod windows;
 
 use assuan::ErrorCode;
 
