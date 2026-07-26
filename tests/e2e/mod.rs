@@ -5,6 +5,8 @@ use insta_cmd::assert_cmd_snapshot;
 
 use crate::utils::TestWorkspace;
 
+mod ttyname;
+
 #[test]
 fn test_cli() {
     let ws = TestWorkspace::new();

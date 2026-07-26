@@ -25,7 +25,6 @@ keyring = { version = "3", features = [
     "sync-secret-service",
     "windows-native",
 ] }
-libc = "0.2"
 miette = { version = "7.6.0", features = ["fancy"] }
 ratatui = "0.29"
 serde = { version = "1", features = ["derive"] }
@@ -35,6 +34,17 @@ toml = "0.8"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 zeroize = { version = "1.8", features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 assert_fs = "1.1.3"

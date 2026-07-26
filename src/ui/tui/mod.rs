@@ -1,8 +1,12 @@
-use std::os::unix::io::RawFd;
+#[cfg(unix)]
+mod unix;
+#[cfg(windows)]
+mod windows;
+
 use std::time::{Duration, Instant};
 
 use assuan::ErrorCode;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use crossterm::terminal::enable_raw_mode;
 use miette::IntoDiagnostic;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -13,6 +17,11 @@ use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
 use crate::state::{PinentryState, SecretBytes};
 use crate::ui::PinentryUi;
+
+#[cfg(unix)]
+type TtyHandle = std::os::unix::io::RawFd;
+#[cfg(windows)]
+type TtyHandle = ();
 
 type TuiTerminal = Terminal<CrosstermBackend<std::io::Stdout>>;
 
@@ -34,20 +43,12 @@ impl PinentryUi for TuiUi {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         tracing::debug!("TUI: TtyGuard created, enabling raw mode");
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
-        let tty_fd = guard.tty_fd();
-        tracing::debug!("TUI: terminal created, entering get_pin loop (tty_fd={tty_fd})");
-        // Verify fd is still valid before entering the loop
-        let check = unsafe { libc::fcntl(tty_fd, libc::F_GETFD) };
-        let isatty = unsafe { libc::isatty(tty_fd) };
-        let mut stat = unsafe { std::mem::zeroed::<libc::stat>() };
-        let stat_ok = unsafe { libc::fstat(tty_fd, &mut stat) };
-        tracing::debug!(
-            "TUI: fd={tty_fd}: fcntl={check}, isatty={isatty}, fstat={stat_ok}, mode={:#o}",
-            stat.st_mode
-        );
-        let result = run_getpin(&mut terminal, tty_fd, state);
+        #[allow(clippy::let_unit_value)]
+        let handle = guard.handle();
+        tracing::debug!("TUI: terminal created, entering get_pin loop");
+        let result = run_getpin(&mut terminal, handle, state);
         tracing::debug!("TUI: get_pin loop exited with result: {:?}", result.is_ok());
-        cleanup_terminal(tty_fd).map_err(|_| ErrorCode::GENERAL)?;
+        cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result
@@ -56,9 +57,10 @@ impl PinentryUi for TuiUi {
     fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode> {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
-        let tty_fd = guard.tty_fd();
-        let result = run_confirm(&mut terminal, tty_fd, state);
-        cleanup_terminal(tty_fd).map_err(|_| ErrorCode::GENERAL)?;
+        #[allow(clippy::let_unit_value)]
+        let handle = guard.handle();
+        let result = run_confirm(&mut terminal, handle, state);
+        cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result
@@ -67,102 +69,24 @@ impl PinentryUi for TuiUi {
     fn message(&self, state: &PinentryState) -> Result<(), ErrorCode> {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
-        let tty_fd = guard.tty_fd();
-        let result = run_message(&mut terminal, tty_fd, state);
-        cleanup_terminal(tty_fd).map_err(|_| ErrorCode::GENERAL)?;
+        #[allow(clippy::let_unit_value)]
+        let handle = guard.handle();
+        let result = run_message(&mut terminal, handle, state);
+        cleanup_terminal(handle).map_err(|_| ErrorCode::GENERAL)?;
         drop(terminal);
         drop(guard);
         result
     }
 }
 
-/// RAII guard that redirects stdin/stdout to the terminal device.
-struct TtyGuard {
-    saved_stdin: RawFd,
-    saved_stdout: RawFd,
-    tty_fd: RawFd,
-}
+// -- Platform dispatch --
 
-impl TtyGuard {
-    fn redirect(state: &PinentryState) -> miette::Result<Self> {
-        let path = state
-            .ttyname
-            .clone()
-            .unwrap_or_else(|| "/dev/tty".to_string());
-        tracing::debug!("TUI: redirecting to terminal: {path}");
+#[cfg(unix)]
+use unix::{TtyGuard, cleanup_terminal, poll_key};
+#[cfg(windows)]
+use windows::{TtyGuard, cleanup_terminal, poll_key};
 
-        let path_cstr = std::ffi::CString::new(path.clone())
-            .map_err(|_| miette::miette!("invalid tty path: {path}"))?;
-
-        let saved_stdin = unsafe { libc::dup(libc::STDIN_FILENO) };
-        if saved_stdin < 0 {
-            return Err(miette::miette!(
-                "failed to dup stdin: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-        let saved_stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
-        if saved_stdout < 0 {
-            unsafe {
-                libc::close(saved_stdin);
-            }
-            return Err(miette::miette!(
-                "failed to dup stdout: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-
-        let tty_fd = unsafe { libc::open(path_cstr.as_ptr(), libc::O_RDWR) };
-        if tty_fd < 0 {
-            unsafe {
-                libc::close(saved_stdin);
-                libc::close(saved_stdout);
-            }
-            return Err(miette::miette!(
-                "failed to open terminal {path}: {}",
-                std::io::Error::last_os_error()
-            ));
-        }
-
-        if unsafe { libc::dup2(tty_fd, libc::STDIN_FILENO) } < 0
-            || unsafe { libc::dup2(tty_fd, libc::STDOUT_FILENO) } < 0
-        {
-            unsafe {
-                libc::close(tty_fd);
-                libc::dup2(saved_stdin, libc::STDIN_FILENO);
-                libc::dup2(saved_stdout, libc::STDOUT_FILENO);
-                libc::close(saved_stdin);
-                libc::close(saved_stdout);
-            }
-            return Err(miette::miette!("failed to redirect fds to tty"));
-        }
-
-        // Keep tty_fd open — we read input from it directly
-        tracing::debug!("TUI: stdin/stdout redirected to {path} (tty_fd={tty_fd})");
-        Ok(Self {
-            saved_stdin,
-            saved_stdout,
-            tty_fd,
-        })
-    }
-
-    fn tty_fd(&self) -> RawFd {
-        self.tty_fd
-    }
-}
-
-impl Drop for TtyGuard {
-    fn drop(&mut self) {
-        unsafe {
-            libc::close(self.tty_fd);
-            libc::dup2(self.saved_stdin, libc::STDIN_FILENO);
-            libc::dup2(self.saved_stdout, libc::STDOUT_FILENO);
-            libc::close(self.saved_stdin);
-            libc::close(self.saved_stdout);
-        }
-        tracing::debug!("TUI: restored stdin/stdout to Assuan pipes");
-    }
-}
+// -- Terminal setup --
 
 fn create_terminal() -> miette::Result<TuiTerminal> {
     enable_raw_mode().into_diagnostic()?;
@@ -172,32 +96,9 @@ fn create_terminal() -> miette::Result<TuiTerminal> {
     Ok(terminal)
 }
 
-/// Clean up terminal state: disable raw mode, leave alternate screen, show cursor.
-/// Writes escape sequences directly to the TTY fd to ensure they reach the terminal.
-fn cleanup_terminal(tty_fd: RawFd) -> miette::Result<()> {
-    // First disable raw mode (restores terminal settings)
-    disable_raw_mode().into_diagnostic()?;
+// -- Key input --
 
-    // Then write escape sequences directly to the TTY
-    unsafe {
-        // Leave alternate screen
-        libc::write(tty_fd, b"\x1b[?1049l".as_ptr() as *const _, 8);
-        // Show cursor
-        libc::write(tty_fd, b"\x1b[?25h".as_ptr() as *const _, 6);
-        // Reset scroll region
-        libc::write(tty_fd, b"\x1b[r".as_ptr() as *const _, 2);
-        // Move cursor to bottom of screen
-        libc::write(tty_fd, b"\x1b[999;1H".as_ptr() as *const _, 8);
-        // Newline
-        libc::write(tty_fd, b"\n".as_ptr() as *const _, 1);
-    }
-
-    Ok(())
-}
-
-// -- Key input via raw fd --
-
-/// A parsed key event from raw terminal input.
+/// A parsed key event from terminal input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Key {
     Char(char),
@@ -209,90 +110,6 @@ enum Key {
     CtrlC,
     Left,
     Right,
-}
-
-/// Read a single key from the TTY fd. Blocks until a key is available.
-fn read_key(tty_fd: RawFd) -> Option<Key> {
-    let mut byte = [0u8; 1];
-    loop {
-        let n = unsafe { libc::read(tty_fd, byte.as_mut_ptr() as *mut _, 1) };
-        if n <= 0 {
-            return None;
-        }
-        match byte[0] {
-            b'\r' | b'\n' => return Some(Key::Enter),
-            0x7f | 0x08 => return Some(Key::Backspace), // DEL or BS
-            0x03 => return Some(Key::CtrlC),            // Ctrl+C
-            0x09 => return Some(Key::Tab),              // Tab
-            0x1b => {
-                // Escape sequence — read next bytes
-                let mut seq = [0u8; 2];
-                // Use select() with short timeout for escape sequences
-                let ready = unsafe {
-                    let mut seqfds: libc::fd_set = std::mem::zeroed();
-                    libc::FD_ZERO(&mut seqfds);
-                    libc::FD_SET(tty_fd, &mut seqfds);
-                    let mut seq_tv = libc::timeval {
-                        tv_sec: 0,
-                        tv_usec: 50_000,
-                    }; // 50ms
-                    let r = libc::select(
-                        tty_fd + 1,
-                        &mut seqfds,
-                        std::ptr::null_mut(),
-                        std::ptr::null_mut(),
-                        &mut seq_tv,
-                    );
-                    r > 0 && libc::FD_ISSET(tty_fd, &seqfds)
-                };
-                if ready {
-                    let n2 = unsafe { libc::read(tty_fd, seq.as_mut_ptr() as *mut _, 2) };
-                    if n2 >= 2 && seq[0] == b'[' {
-                        match seq[1] {
-                            b'D' => return Some(Key::Left),
-                            b'C' => return Some(Key::Right),
-                            b'Z' => return Some(Key::BackTab), // Shift+Tab
-                            _ => {}
-                        }
-                    }
-                }
-                return Some(Key::Esc);
-            }
-            c if (0x20..=0x7e).contains(&c) => return Some(Key::Char(c as char)),
-            _ => {} // ignore other control characters
-        }
-    }
-}
-
-/// Block until a key is available or timeout expires.
-///
-/// Uses `select()` instead of `poll()` because macOS `poll()` returns
-/// `POLLNVAL` for `/dev/tty` file descriptors.
-fn poll_key(tty_fd: RawFd, timeout: Duration) -> Option<Key> {
-    unsafe {
-        let mut readfds: libc::fd_set = std::mem::zeroed();
-        libc::FD_ZERO(&mut readfds);
-        libc::FD_SET(tty_fd, &mut readfds);
-
-        let mut timeval = libc::timeval {
-            tv_sec: timeout.as_secs() as _,
-            tv_usec: timeout.subsec_micros() as _,
-        };
-
-        let ready = libc::select(
-            tty_fd + 1,
-            &mut readfds,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut timeval,
-        );
-
-        if ready > 0 && libc::FD_ISSET(tty_fd, &readfds) {
-            read_key(tty_fd)
-        } else {
-            None
-        }
-    }
 }
 
 // -- Focus state --
@@ -348,7 +165,7 @@ impl ConfirmFocus {
 
 fn run_getpin(
     terminal: &mut TuiTerminal,
-    tty_fd: RawFd,
+    handle: TtyHandle,
     state: &PinentryState,
 ) -> Result<SecretBytes, ErrorCode> {
     let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
@@ -450,7 +267,7 @@ fn run_getpin(
             .map(|t| t.saturating_sub(start.elapsed()))
             .unwrap_or(Duration::from_millis(100));
 
-        if let Some(key) = poll_key(tty_fd, poll) {
+        if let Some(key) = poll_key(handle, poll) {
             match handle_getpin_key(key, &mut focus, &mut input) {
                 GetPinAction::Continue => {}
                 GetPinAction::Submit => {
@@ -525,7 +342,7 @@ fn handle_getpin_key(key: Key, focus: &mut GetPinFocus, input: &mut String) -> G
 
 fn run_confirm(
     terminal: &mut TuiTerminal,
-    tty_fd: RawFd,
+    handle: TtyHandle,
     state: &PinentryState,
 ) -> Result<(), ErrorCode> {
     let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
@@ -612,7 +429,7 @@ fn run_confirm(
         let poll = timeout
             .map(|t| t.saturating_sub(start.elapsed()))
             .unwrap_or(Duration::from_millis(100));
-        if let Some(key) = poll_key(tty_fd, poll) {
+        if let Some(key) = poll_key(handle, poll) {
             if key == Key::CtrlC || key == Key::Esc {
                 return Err(ErrorCode::CANCELED);
             }
@@ -650,7 +467,7 @@ fn run_confirm(
 
 fn run_message(
     terminal: &mut TuiTerminal,
-    tty_fd: RawFd,
+    handle: TtyHandle,
     state: &PinentryState,
 ) -> Result<(), ErrorCode> {
     let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
@@ -697,11 +514,10 @@ fn run_message(
             })
             .map_err(|_| ErrorCode::GENERAL)?;
 
-        if let Some(key) = poll_key(tty_fd, Duration::from_millis(100)) {
-            match key {
-                Key::Enter | Key::Esc | Key::Char(' ') | Key::CtrlC => return Ok(()),
-                _ => {}
-            }
+        if let Some(Key::Enter | Key::Esc | Key::Char(' ') | Key::CtrlC) =
+            poll_key(handle, Duration::from_millis(100))
+        {
+            return Ok(());
         }
     }
 }
