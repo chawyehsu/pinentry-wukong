@@ -1,7 +1,8 @@
 use std::io::Write;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+    WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -17,6 +18,7 @@ use windows_sys::Win32::System::Threading::WaitForSingleObject;
 use crate::state::PinentryState;
 
 /// How the Windows console was obtained.
+#[derive(Debug)]
 pub(super) enum ConsoleSource {
     /// stdin is already a real console (`GetConsoleMode` succeeds).
     Direct,
@@ -346,8 +348,8 @@ pub(super) fn resolve_console_handles(
     state: &PinentryState,
 ) -> miette::Result<(ConsoleHandle, ConsoleHandle, ConsoleSource)> {
     let source = resolve_console_source(state)?;
-    let writer = open_console_handle(&source, "CONOUT$", 0x40000000)?;
-    let reader = open_console_handle(&source, "CONIN$", 0xC0000000)?;
+    let writer = open_console_handle(&source, "CONOUT$", GENERIC_READ | GENERIC_WRITE)?;
+    let reader = open_console_handle(&source, "CONIN$", GENERIC_READ | GENERIC_WRITE)?;
     Ok((writer, reader, source))
 }
 

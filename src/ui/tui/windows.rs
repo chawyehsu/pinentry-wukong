@@ -1,7 +1,9 @@
 use std::io::Write;
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows_sys::Win32::Foundation::{
+    GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows_sys::Win32::System::Console::{
     ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT, INPUT_RECORD, KEY_EVENT,
     KEY_EVENT_RECORD, ReadConsoleInputW, SetConsoleMode,
@@ -28,8 +30,8 @@ pub(super) struct TtyGuard {
 impl TtyGuard {
     pub(super) fn redirect(state: &PinentryState) -> miette::Result<Self> {
         let source = resolve_console_source(state)?;
-        let writer = open_console_handle(&source, "CONOUT$", 0x40000000)?;
-        let reader = open_console_handle(&source, "CONIN$", 0xC0000000)?;
+        let writer = open_console_handle(&source, "CONOUT$", GENERIC_READ | GENERIC_WRITE)?;
+        let reader = open_console_handle(&source, "CONIN$", GENERIC_READ | GENERIC_WRITE)?;
 
         let _ = std::io::stdout().flush();
 
