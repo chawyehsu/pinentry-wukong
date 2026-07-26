@@ -59,7 +59,7 @@ impl TryFrom<Request> for Command {
 
     fn try_from(req: Request) -> Result<Self, Self::Error> {
         let Request::Command { name, args } = req else {
-            unreachable!("AssuanCommand::try_from called on non-Command request");
+            return Err(ErrorCode::ASS_INV_VALUE.into());
         };
 
         let args = args.unwrap_or_default();
@@ -117,10 +117,7 @@ impl TryFrom<Request> for Command {
             "MESSAGE" => Ok(Command::Message),
             "GETINFO" => Ok(Command::GetInfo(args)),
 
-            _ => Err(Error::new(
-                ErrorCode::ASS_UNKNOWN_CMD,
-                format!("unknown command: {name}"),
-            )),
+            _ => Err(Error::new(ErrorCode::ASS_UNKNOWN_CMD, "Unknown command")),
         }
     }
 }
