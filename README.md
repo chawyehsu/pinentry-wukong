@@ -1,17 +1,23 @@
 # pinentry-wukong
 
-A cross-platform [pinentry](https://gnupg.org/related_software/pinentry/index.html) alternative built with Rust
+> A versatile [pinentry](https://gnupg.org/related_software/pinentry/index.html) implementation written in Rust
+
+[![crates-svg]][crates-url]
+[![license][license-badge]](LICENSE-APACHE)
+[![codecov][codecov-badge]][codecov]
+[![release][release-ci-badge]][release-ci-url]
 
 ## What is pinentry?
 
-Pinentry is a passphrase dialog invoked by [gpg-agent](https://gnupg.org/documentation/manuals/gnupg/Agent-Options.html) when GPG operations require a secret key. The standard pinentry implementations (pinentry-gtk2, pinentry-qt, pinentry-curses) are written in C with toolkit-specific dependencies.
+Pinentry is a passphrase dialog invoked by [gpg-agent](https://gnupg.org/documentation/manuals/gnupg/Agent-Options.html) when GPG operations require a secret key. The standard pinentry implementations (pinentry-gtk2, pinentry-qt, pinentry-curses, pinentry-tty, pinentry-w32) are written in C and platform-specific.
 
 **pinentry-wukong** replaces all of them with a single Rust binary that:
 
 - Works on **Windows, macOS, and Linux** from a single codebase
+  - **Yes** you can use the *TTY* mode on Windows as well, natively!
+- **Native OS keychain** integration (macOS Keychain, Linux Secret Service, Windows Credential Manager)
 - Uses **ratatui** for a modern, clean terminal UI
-- Supports **native OS keychain** integration (macOS Keychain, Linux Secret Service, Windows Credential Manager)
-- Implements the **Assuan protocol** for drop-in compatibility with gpg-agent
+- More to come! GUI...
 
 ## Installation
 
@@ -53,25 +59,32 @@ echo -e "GETPIN" | pinentry-wukong --ui=tty
 
 ### CLI options
 
-```
+```console
 Usage: pinentry-wukong [OPTIONS] [COMMAND]
 
 Commands:
+  serve        Run the pinentry server
   completions  Generate shell completions
+  config       Manage configuration
   help         Print this message or the help of the given subcommand(s)
 
 Options:
-      --ui <UI>                    Force a specific UI mode (tui, tty)
-  -o, --timeout <TIMEOUT>          Timeout in seconds
-  -D, --display <DISPLAY>          X display name
-  -T, --ttyname <TTYNAME>          TTY terminal node name
-  -N, --ttytype <TTYTYPE>          TTY terminal type
-  -C, --lc-ctype <LC_CTYPE>        Set LC_CTYPE value
-  -M, --lc-messages <LC_MESSAGES>  Set LC_MESSAGES value
-  -v, --verbose...                 Increase logging verbosity
-  -q, --quiet...                   Decrease logging verbosity
-  -h, --help                       Print help
-  -V, --version                    Print version
+  -v, --verbose...            Increase logging verbosity
+  -q, --quiet...              Decrease logging verbosity
+      --debug                 Enable debug logging (equivalent to -vvv)
+      --config <PATH>         Path to a custom config file
+      --keyring               Enable system keyring for secret management (default)
+      --no-keyring            Disable system keyring for secret management
+  -D, --display <DISPLAY>     X display name (ignored on non-X11)
+  -T, --ttyname <FILE>        TTY terminal node name
+  -N, --ttytype <NAME>        TTY terminal type
+  -C, --lc-ctype <STRING>     TTY LC_CTYPE value
+  -M, --lc-messages <STRING>  TTY LC_MESSAGES value
+  -o, --timeout <SECS>        Input timeout in seconds (default: 60)
+  -g, --no-global-grab        Grab keyboard only when the window is focused
+      --ui <MODE>             Force a specific UI mode
+  -h, --help                  Print help (see more with '--help')
+  -V, --version               Print version
 ```
 
 ## Supported Assuan Commands
@@ -106,3 +119,11 @@ Options:
 **pinentry-wukong** © [Chawye Hsu](https://github.com/chawyehsu). Released under the [GPL-2.0-only](LICENSE) License.
 
 > [Blog](https://chawyehsu.com) · GitHub [@chawyehsu](https://github.com/chawyehsu) · Twitter [@chawyehsu](https://twitter.com/chawyehsu)
+
+[crates-svg]: https://img.shields.io/crates/v/pinentry-wukong.svg?style=flat&logo=rust
+[crates-url]: https://crates.io/crates/pinentry-wukong
+[license-badge]: https://img.shields.io/github/license/chawyehsu/pinentry-wukong?style=flat&logo=spdx
+[codecov-badge]: https://img.shields.io/codecov/c/gh/chawyehsu/pinentry-wukong?style=flat&logo=codecov
+[codecov]: https://codecov.io/github/chawyehsu/pinentry-wukong
+[release-ci-badge]: https://github.com/chawyehsu/pinentry-wukong/actions/workflows/release.yml/badge.svg
+[release-ci-url]: https://github.com/chawyehsu/pinentry-wukong/actions/workflows/release.yml
