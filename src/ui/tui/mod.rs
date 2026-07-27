@@ -49,7 +49,7 @@ impl PinentryUi for TuiUi {
         tracing::debug!("TUI: terminal created, entering get_pin loop");
         let result = run_getpin(&mut terminal, guard.handle(), state);
         tracing::debug!("TUI: get_pin loop exited with result: {:?}", result.is_ok());
-        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        cleanup_terminal();
         drop(terminal);
         drop(guard);
         result
@@ -59,7 +59,7 @@ impl PinentryUi for TuiUi {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
         let result = run_confirm(&mut terminal, guard.handle(), state);
-        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        cleanup_terminal();
         drop(terminal);
         drop(guard);
         result
@@ -69,7 +69,7 @@ impl PinentryUi for TuiUi {
         let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
         let result = run_message(&mut terminal, guard.handle(), state);
-        cleanup_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        cleanup_terminal();
         drop(terminal);
         drop(guard);
         result
@@ -100,10 +100,13 @@ fn create_terminal() -> miette::Result<TuiTerminal> {
     result
 }
 
-fn cleanup_terminal() -> miette::Result<()> {
-    disable_raw_mode().into_diagnostic()?;
-    execute!(std::io::stdout(), LeaveAlternateScreen).into_diagnostic()?;
-    Ok(())
+fn cleanup_terminal() {
+    if let Err(e) = disable_raw_mode() {
+        tracing::warn!("failed to disable raw mode: {e}");
+    }
+    if let Err(e) = execute!(std::io::stdout(), LeaveAlternateScreen) {
+        tracing::warn!("failed to leave alternate screen: {e}");
+    }
 }
 
 // -- Key input --
