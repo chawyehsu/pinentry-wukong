@@ -1,8 +1,5 @@
 use std::time::Duration;
 
-use crossterm::terminal::disable_raw_mode;
-use miette::IntoDiagnostic;
-
 use super::Key;
 use crate::state::PinentryState;
 
@@ -92,20 +89,6 @@ impl Drop for TtyGuard {
     }
 }
 
-pub(super) fn cleanup_terminal(tty_fd: std::os::unix::io::RawFd) -> miette::Result<()> {
-    disable_raw_mode().into_diagnostic()?;
-    // On Unix, write escape sequences directly to the TTY to ensure they
-    // reach the terminal even if stdout has been redirected.
-    unsafe {
-        libc::write(tty_fd, b"\x1b[?1049l".as_ptr().cast(), 8); // leave alternate screen
-        libc::write(tty_fd, b"\x1b[?25h".as_ptr().cast(), 6); // show cursor
-        libc::write(tty_fd, b"\x1b[r".as_ptr().cast(), 3); // reset scroll region
-        libc::write(tty_fd, b"\x1b[999;1H".as_ptr().cast(), 10); // move cursor to bottom
-        libc::write(tty_fd, b"\n".as_ptr().cast(), 1);
-    }
-    Ok(())
-}
-
 fn read_key(tty_fd: std::os::unix::io::RawFd) -> Option<Key> {
     let mut byte = [0u8; 1];
     loop {
@@ -137,18 +120,56 @@ fn read_key(tty_fd: std::os::unix::io::RawFd) -> Option<Key> {
                     );
                     r > 0 && libc::FD_ISSET(tty_fd, &seqfds)
                 };
-                if ready {
-                    let n2 = unsafe { libc::read(tty_fd, seq.as_mut_ptr() as *mut _, 2) };
-                    if n2 >= 2 && seq[0] == b'[' {
-                        match seq[1] {
-                            b'D' => return Some(Key::Left),
-                            b'C' => return Some(Key::Right),
-                            b'Z' => return Some(Key::BackTab),
-                            _ => {}
+                if !ready {
+                    return Some(Key::Esc);
+                }
+                let n2 = unsafe { libc::read(tty_fd, seq.as_mut_ptr() as *mut _, 2) };
+                if n2 >= 2 && seq[0] == b'[' {
+                    match seq[1] {
+                        b'D' => return Some(Key::Left),
+                        b'C' => return Some(Key::Right),
+                        b'Z' => return Some(Key::BackTab),
+                        _ => {
+                            // Unknown CSI sequence (up/down arrows, mouse
+                            // events, etc.) — drain remaining bytes through
+                            // the final terminator so they don't pollute the
+                            // next read.
+                            loop {
+                                let mut discard = [0u8; 1];
+                                let ready = unsafe {
+                                    let mut rfds: libc::fd_set = std::mem::zeroed();
+                                    libc::FD_ZERO(&mut rfds);
+                                    libc::FD_SET(tty_fd, &mut rfds);
+                                    let mut tv = libc::timeval {
+                                        tv_sec: 0,
+                                        tv_usec: 5_000,
+                                    };
+                                    let r = libc::select(
+                                        tty_fd + 1,
+                                        &mut rfds,
+                                        std::ptr::null_mut(),
+                                        std::ptr::null_mut(),
+                                        &mut tv,
+                                    );
+                                    r > 0 && libc::FD_ISSET(tty_fd, &rfds)
+                                };
+                                if !ready {
+                                    break;
+                                }
+                                if unsafe { libc::read(tty_fd, discard.as_mut_ptr() as *mut _, 1) }
+                                    <= 0
+                                {
+                                    break;
+                                }
+                                if discard[0] == b'm' || discard[0] == b'M' {
+                                    break;
+                                }
+                            }
+                            continue;
                         }
                     }
                 }
-                return Some(Key::Esc);
+                continue;
             }
             c if (0x20..=0x7e).contains(&c) => return Some(Key::Char(c as char)),
             _ => {}
