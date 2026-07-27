@@ -87,11 +87,17 @@ use windows::{TtyGuard, poll_key};
 
 fn create_terminal() -> miette::Result<TuiTerminal> {
     enable_raw_mode().into_diagnostic()?;
-    let backend = CrosstermBackend::new(std::io::stdout());
-    let mut terminal = Terminal::new(backend).into_diagnostic()?;
-    terminal.clear().into_diagnostic()?;
-    execute!(std::io::stdout(), EnterAlternateScreen).into_diagnostic()?;
-    Ok(terminal)
+    let result = (|| {
+        execute!(std::io::stdout(), EnterAlternateScreen).into_diagnostic()?;
+        let backend = CrosstermBackend::new(std::io::stdout());
+        let mut terminal = Terminal::new(backend).into_diagnostic()?;
+        terminal.clear().into_diagnostic()?;
+        Ok(terminal)
+    })();
+    if result.is_err() {
+        let _ = disable_raw_mode();
+    }
+    result
 }
 
 fn cleanup_terminal() -> miette::Result<()> {
