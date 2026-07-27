@@ -5,20 +5,6 @@ use assuan::ErrorCode;
 use crate::state::{PinentryState, SecretBytes};
 use crate::ui::windows::resolve_console_handles;
 
-/// Read a password with echo disabled. Returns `SecretBytes` (zeroed on drop).
-fn read_password(
-    reader: &crate::ui::windows::ConsoleHandle,
-    writer: &mut crate::ui::windows::ConsoleHandle,
-    timeout_secs: u32,
-) -> Result<SecretBytes, ErrorCode> {
-    let secret = SecretBytes::from(reader.read_line_bytes(timeout_secs)?);
-
-    // Echo was disabled, so the user's Enter didn't produce a visible newline
-    writeln!(writer).map_err(|_| ErrorCode::GENERAL)?;
-
-    Ok(secret)
-}
-
 pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
     let (mut writer, reader, _source) =
         resolve_console_handles(state).map_err(|_| ErrorCode::GENERAL)?;
@@ -33,7 +19,10 @@ pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
     write!(writer, "{prompt} ").map_err(|_| ErrorCode::GENERAL)?;
     writer.flush().map_err(|_| ErrorCode::GENERAL)?;
 
-    let pin = read_password(&reader, &mut writer, state.timeout)?;
+    let pin = SecretBytes::from(reader.read_line_bytes(state.timeout)?);
+
+    // Echo was disabled, so the user's Enter didn't produce a visible newline
+    writeln!(writer).map_err(|_| ErrorCode::GENERAL)?;
 
     if pin.is_empty() {
         return Err(ErrorCode::CANCELED);
