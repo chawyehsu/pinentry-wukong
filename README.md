@@ -26,6 +26,9 @@ These implementations have various issues, such as:
 - Uses **ratatui** for a modern, clean terminal UI
 - More to come! GUI...
 
+![](https://github.com/user-attachments/assets/36d4e8ea-b878-4e98-a93a-74cda978eb73)
+_pinentry-wukong TUI mode on Windows (WIP, non-final deliverable)_
+
 ## Getting started
 
 ### Install
@@ -103,7 +106,9 @@ for PowerShell on Windows:
 $env:GPG_TTY = "/conhost/$PID"
 ```
 
-(3) `GPG_TTY` is required for TTY mode to work properly. Then restart `gpg-agent`:
+**NOTE:** `GPG_TTY` is required for TTY/TUI mode to work properly.
+
+(3) Then restart `gpg-agent`:
 
 ```sh
 gpgconf --kill gpg-agent
