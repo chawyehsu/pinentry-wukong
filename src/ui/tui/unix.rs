@@ -1,8 +1,5 @@
 use std::time::Duration;
 
-use crossterm::terminal::disable_raw_mode;
-use miette::IntoDiagnostic;
-
 use super::Key;
 use crate::state::PinentryState;
 
@@ -90,20 +87,6 @@ impl Drop for TtyGuard {
         }
         tracing::debug!("TUI: restored stdin/stdout to Assuan pipes");
     }
-}
-
-pub(super) fn cleanup_terminal(tty_fd: std::os::unix::io::RawFd) -> miette::Result<()> {
-    disable_raw_mode().into_diagnostic()?;
-    // On Unix, write escape sequences directly to the TTY to ensure they
-    // reach the terminal even if stdout has been redirected.
-    unsafe {
-        libc::write(tty_fd, b"\x1b[?1049l".as_ptr().cast(), 8); // leave alternate screen
-        libc::write(tty_fd, b"\x1b[?25h".as_ptr().cast(), 6); // show cursor
-        libc::write(tty_fd, b"\x1b[r".as_ptr().cast(), 3); // reset scroll region
-        libc::write(tty_fd, b"\x1b[999;1H".as_ptr().cast(), 10); // move cursor to bottom
-        libc::write(tty_fd, b"\n".as_ptr().cast(), 1);
-    }
-    Ok(())
 }
 
 fn read_key(tty_fd: std::os::unix::io::RawFd) -> Option<Key> {
