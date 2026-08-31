@@ -485,6 +485,7 @@ fn run_message(
 ) -> Result<(), ErrorCode> {
     let title = state.title.as_deref().unwrap_or(env!("CARGO_PKG_NAME"));
     let description = state.description.as_deref().unwrap_or("");
+    let error = state.error.as_deref();
     let ok_label = &state.ok;
 
     loop {
@@ -503,6 +504,7 @@ fn run_message(
                     .direction(Direction::Vertical)
                     .constraints([
                         Constraint::Length(desc_lines(description, inner.width) as u16),
+                        Constraint::Length(if error.is_some() { 1 } else { 0 }),
                         Constraint::Length(1),
                         Constraint::Length(1),
                     ])
@@ -511,6 +513,13 @@ fn run_message(
                     f.render_widget(
                         Paragraph::new(description).style(Style::default().fg(Color::White)),
                         chunks[0],
+                    );
+                }
+                if let Some(err) = error {
+                    f.render_widget(
+                        Paragraph::new(err)
+                            .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        chunks[1],
                     );
                 }
                 let btn = Style::default()
@@ -522,7 +531,7 @@ fn run_message(
                         Span::raw("  "),
                         Span::styled(format!(" [ {ok_label} ] "), btn),
                     ])),
-                    chunks[2],
+                    chunks[3],
                 );
             })
             .map_err(|_| ErrorCode::GENERAL)?;

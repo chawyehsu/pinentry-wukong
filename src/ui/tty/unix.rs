@@ -27,6 +27,16 @@ fn open_tty(state: &PinentryState) -> miette::Result<(BufReader<File>, File)> {
     Ok((BufReader::new(tty_in), tty_out))
 }
 
+fn write_error(writer: &mut File, error: &str) -> Result<(), ErrorCode> {
+    if std::env::var("NO_COLOR").is_err() && std::env::var("TERM").is_ok_and(|term| term != "dumb")
+    {
+        write!(writer, "\x1b[31m{error}\x1b[0m").map_err(|_| ErrorCode::GENERAL)?;
+    } else {
+        write!(writer, "{error}").map_err(|_| ErrorCode::GENERAL)?;
+    }
+    writeln!(writer).map_err(|_| ErrorCode::GENERAL)
+}
+
 pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
     let mut writer = {
         let path = tty_path(state);
@@ -40,7 +50,7 @@ pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
         writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
     }
     if let Some(ref err) = state.error {
-        writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
+        write_error(&mut writer, err)?;
     }
     let prompt = &state.prompt;
     write!(writer, "{prompt} ").map_err(|_| ErrorCode::GENERAL)?;
@@ -68,7 +78,7 @@ pub(super) fn confirm(state: &PinentryState) -> Result<(), ErrorCode> {
         writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
     }
     if let Some(ref err) = state.error {
-        writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
+        write_error(&mut writer, err)?;
     }
 
     let ok_label = &state.ok;
@@ -106,6 +116,9 @@ pub(super) fn message(state: &PinentryState) -> Result<(), ErrorCode> {
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
+    }
+    if let Some(ref err) = state.error {
+        write_error(&mut writer, err)?;
     }
     write!(writer, "[OK] ").map_err(|_| ErrorCode::GENERAL)?;
     writer.flush().map_err(|_| ErrorCode::GENERAL)?;

@@ -8,10 +8,10 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{
-    AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_PROCESSED_INPUT, FlushConsoleInputBuffer,
-    FreeConsole, GetConsoleMode, GetStdHandle, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD,
-    ReadConsoleInputW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode, SetStdHandle,
-    WriteConsoleW,
+    AllocConsole, AttachConsole, CONSOLE_MODE, CONSOLE_SCREEN_BUFFER_INFO, ENABLE_PROCESSED_INPUT,
+    FlushConsoleInputBuffer, FreeConsole, GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle,
+    INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD, ReadConsoleInputW, STD_INPUT_HANDLE,
+    STD_OUTPUT_HANDLE, SetConsoleMode, SetConsoleTextAttribute, SetStdHandle, WriteConsoleW,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
@@ -251,6 +251,19 @@ impl Write for ConsoleHandle {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+pub(super) fn write_error(writer: &mut ConsoleHandle, error: &str) -> std::io::Result<()> {
+    let mut info = unsafe { std::mem::zeroed::<CONSOLE_SCREEN_BUFFER_INFO>() };
+    let colored = unsafe { GetConsoleScreenBufferInfo(writer.raw(), &mut info) } != 0;
+    if colored {
+        unsafe { SetConsoleTextAttribute(writer.raw(), info.wAttributes | 0x0004) };
+    }
+    let result = write!(writer, "{error}\r\n");
+    if colored {
+        unsafe { SetConsoleTextAttribute(writer.raw(), info.wAttributes) };
+    }
+    result
 }
 
 /// Parse a `/conhost/<pid>` ttyname value, returning the PID if valid.

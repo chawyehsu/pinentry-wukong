@@ -111,7 +111,9 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
         match cmd {
             Command::SetDesc(s) => self.state.description = Some(s),
             Command::SetPrompt(s) => self.state.prompt = s,
-            Command::SetError(s) => self.state.error = Some(s),
+            Command::SetError(s) => {
+                self.state.error = if s.is_empty() { None } else { Some(s) };
+            }
             Command::SetTitle(s) => self.state.title = Some(s),
             Command::SetOk(s) => self.state.ok = s,
             Command::SetNotOk(s) => self.state.notok = Some(s),
@@ -224,9 +226,10 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
 
         tracing::debug!("GETPIN: prompting user via UI");
 
+        let result = ui.get_pin(&self.state);
         self.state.error = None;
 
-        match ui.get_pin(&self.state) {
+        match result {
             Ok(secret) => {
                 if !secret.is_empty() {
                     tracing::debug!(
@@ -283,7 +286,10 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
     fn handle_confirm(&mut self, ui: &dyn PinentryUi, one_button: bool) -> Result<(), Error> {
         self.state.one_button = one_button;
 
-        match ui.confirm(&self.state) {
+        let result = ui.confirm(&self.state);
+        self.state.error = None;
+
+        match result {
             Ok(()) => {
                 self.send(Response::OK)?;
             }
@@ -299,7 +305,9 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
     }
 
     fn handle_message(&mut self, ui: &dyn PinentryUi) -> Result<(), Error> {
-        ui.message(&self.state)?;
+        let result = ui.message(&self.state);
+        self.state.error = None;
+        result?;
         self.send(Response::OK)?;
         Ok(())
     }
@@ -334,5 +342,72 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
         self.inner
             .send(Response::err(code, msg.map(|s| s.to_string())))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::io::Cursor;
+
+    use super::*;
+
+    struct RecordingUi {
+        errors: RefCell<Vec<Option<String>>>,
+    }
+
+    impl PinentryUi for RecordingUi {
+        fn flavor(&self) -> &str {
+            "test"
+        }
+
+        fn get_pin(&self, state: &PinentryState) -> Result<crate::state::SecretBytes, ErrorCode> {
+            self.errors.borrow_mut().push(state.error.clone());
+            Err(ErrorCode::CANCELED)
+        }
+
+        fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode> {
+            self.errors.borrow_mut().push(state.error.clone());
+            Err(ErrorCode::CANCELED)
+        }
+
+        fn message(&self, state: &PinentryState) -> Result<(), ErrorCode> {
+            self.errors.borrow_mut().push(state.error.clone());
+            Err(ErrorCode::CANCELED)
+        }
+    }
+
+    #[test]
+    fn caller_feedback_is_cleared_after_one_ui_action() {
+        let mut server = PinentryServer::new(
+            Cursor::new(Vec::<u8>::new()),
+            Vec::<u8>::new(),
+            true,
+            60,
+            None,
+        );
+        let ui = RecordingUi {
+            errors: RefCell::new(Vec::new()),
+        };
+
+        server
+            .handle_command(Command::SetError("Bad Passphrase (try 2 of 3)".into()), &ui)
+            .unwrap();
+        assert!(server.handle_command(Command::GetPin, &ui).is_err());
+        assert!(server.handle_command(Command::GetPin, &ui).is_err());
+
+        server
+            .handle_command(Command::SetError(String::new()), &ui)
+            .unwrap();
+        assert!(
+            server
+                .handle_command(Command::Confirm { one_button: false }, &ui)
+                .is_err()
+        );
+
+        assert_eq!(
+            ui.errors.into_inner(),
+            vec![Some("Bad Passphrase (try 2 of 3)".into()), None, None,]
+        );
     }
 }
