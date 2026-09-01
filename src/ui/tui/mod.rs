@@ -26,7 +26,10 @@ type TtyHandle = std::os::unix::io::RawFd;
 #[cfg(windows)]
 type TtyHandle = windows_sys::Win32::Foundation::HANDLE;
 
+#[cfg(unix)]
 type TuiTerminal = Terminal<CrosstermBackend<std::io::Stdout>>;
+#[cfg(windows)]
+type TuiTerminal = Terminal<CrosstermBackend<crate::ui::windows::ConsoleHandle>>;
 
 pub struct TuiUi;
 
@@ -43,33 +46,66 @@ impl PinentryUi for TuiUi {
 
     fn get_pin(&self, state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
         tracing::debug!("TUI: get_pin called");
-        let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
+        let mut guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
         tracing::debug!("TUI: TtyGuard created, enabling raw mode");
+        #[cfg(unix)]
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let writer = guard.take_writer().map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let _virtual_terminal_guard = writer
+            .enable_virtual_terminal_processing()
+            .map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let mut terminal = create_terminal(writer).map_err(|_| ErrorCode::GENERAL)?;
         tracing::debug!("TUI: terminal created, entering get_pin loop");
         let result = run_getpin(&mut terminal, guard.handle(), state);
         tracing::debug!("TUI: get_pin loop exited with result: {:?}", result.is_ok());
-        cleanup_terminal();
+        cleanup_terminal(&mut terminal);
+        #[cfg(windows)]
+        drop(_virtual_terminal_guard);
         drop(terminal);
         drop(guard);
         result
     }
 
     fn confirm(&self, state: &PinentryState) -> Result<(), ErrorCode> {
-        let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
+        let mut guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(unix)]
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let writer = guard.take_writer().map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let _virtual_terminal_guard = writer
+            .enable_virtual_terminal_processing()
+            .map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let mut terminal = create_terminal(writer).map_err(|_| ErrorCode::GENERAL)?;
         let result = run_confirm(&mut terminal, guard.handle(), state);
-        cleanup_terminal();
+        cleanup_terminal(&mut terminal);
+        #[cfg(windows)]
+        drop(_virtual_terminal_guard);
         drop(terminal);
         drop(guard);
         result
     }
 
     fn message(&self, state: &PinentryState) -> Result<(), ErrorCode> {
-        let guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
+        let mut guard = TtyGuard::redirect(state).map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(unix)]
         let mut terminal = create_terminal().map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let writer = guard.take_writer().map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let _virtual_terminal_guard = writer
+            .enable_virtual_terminal_processing()
+            .map_err(|_| ErrorCode::GENERAL)?;
+        #[cfg(windows)]
+        let mut terminal = create_terminal(writer).map_err(|_| ErrorCode::GENERAL)?;
         let result = run_message(&mut terminal, guard.handle(), state);
-        cleanup_terminal();
+        cleanup_terminal(&mut terminal);
+        #[cfg(windows)]
+        drop(_virtual_terminal_guard);
         drop(terminal);
         drop(guard);
         result
@@ -85,6 +121,7 @@ use windows::{TtyGuard, poll_key};
 
 // -- Terminal setup --
 
+#[cfg(unix)]
 fn create_terminal() -> miette::Result<TuiTerminal> {
     enable_raw_mode().into_diagnostic()?;
     let result = (|| {
@@ -100,11 +137,38 @@ fn create_terminal() -> miette::Result<TuiTerminal> {
     result
 }
 
-fn cleanup_terminal() {
+#[cfg(windows)]
+fn create_terminal(writer: crate::ui::windows::ConsoleHandle) -> miette::Result<TuiTerminal> {
+    enable_raw_mode().into_diagnostic()?;
+    let result = (|| {
+        let backend = CrosstermBackend::new(writer);
+        let mut terminal = Terminal::new(backend).into_diagnostic()?;
+        execute!(terminal.backend_mut(), EnterAlternateScreen).into_diagnostic()?;
+        terminal.clear().into_diagnostic()?;
+        Ok(terminal)
+    })();
+    if result.is_err() {
+        let _ = disable_raw_mode();
+    }
+    result
+}
+
+#[cfg(unix)]
+fn cleanup_terminal(_terminal: &mut TuiTerminal) {
     if let Err(e) = disable_raw_mode() {
         tracing::warn!("failed to disable raw mode: {e}");
     }
     if let Err(e) = execute!(std::io::stdout(), LeaveAlternateScreen) {
+        tracing::warn!("failed to leave alternate screen: {e}");
+    }
+}
+
+#[cfg(windows)]
+fn cleanup_terminal(terminal: &mut TuiTerminal) {
+    if let Err(e) = disable_raw_mode() {
+        tracing::warn!("failed to disable raw mode: {e}");
+    }
+    if let Err(e) = execute!(terminal.backend_mut(), LeaveAlternateScreen) {
         tracing::warn!("failed to leave alternate screen: {e}");
     }
 }
