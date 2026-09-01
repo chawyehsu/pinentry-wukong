@@ -62,9 +62,9 @@ impl PinentryUi for TuiUi {
         let result = run_getpin(&mut terminal, guard.handle(), state);
         tracing::debug!("TUI: get_pin loop exited with result: {:?}", result.is_ok());
         cleanup_terminal(&mut terminal);
+        drop(terminal);
         #[cfg(windows)]
         drop(_virtual_terminal_guard);
-        drop(terminal);
         drop(guard);
         result
     }
@@ -83,9 +83,9 @@ impl PinentryUi for TuiUi {
         let mut terminal = create_terminal(writer).map_err(|_| ErrorCode::GENERAL)?;
         let result = run_confirm(&mut terminal, guard.handle(), state);
         cleanup_terminal(&mut terminal);
+        drop(terminal);
         #[cfg(windows)]
         drop(_virtual_terminal_guard);
-        drop(terminal);
         drop(guard);
         result
     }
@@ -104,9 +104,9 @@ impl PinentryUi for TuiUi {
         let mut terminal = create_terminal(writer).map_err(|_| ErrorCode::GENERAL)?;
         let result = run_message(&mut terminal, guard.handle(), state);
         cleanup_terminal(&mut terminal);
+        drop(terminal);
         #[cfg(windows)]
         drop(_virtual_terminal_guard);
-        drop(terminal);
         drop(guard);
         result
     }
