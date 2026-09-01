@@ -112,7 +112,36 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
             Command::SetDesc(s) => self.state.description = Some(s),
             Command::SetPrompt(s) => self.state.prompt = s,
             Command::SetError(s) => {
-                self.state.error = if s.is_empty() { None } else { Some(s) };
+                if s.is_empty() {
+                    self.state.error = None;
+                } else {
+                    // A cached passphrase is only an unverified candidate.  If
+                    // gpg-agent reports an error after returning it, invalidate
+                    // the external cache before the next GETPIN.  Otherwise a
+                    // new pinentry process can return the same bad passphrase
+                    // without giving the user a chance to enter one.
+                    if self.state.pin_from_cache {
+                        if let Some(keygrip) = self.state.keyinfo.as_deref()
+                            && let Some(ref keychain) = self.keychain
+                        {
+                            match keychain.clear(keygrip) {
+                                Ok(true) => tracing::info!(
+                                    "cleared rejected cached passphrase for key {keygrip}"
+                                ),
+                                Ok(false) => tracing::debug!(
+                                    "rejected cached passphrase was already absent for key {keygrip}"
+                                ),
+                                Err(e) => tracing::warn!(
+                                    "failed to clear rejected cached passphrase for key {keygrip}: {e}"
+                                ),
+                            }
+                        }
+                        // Do not clear repeatedly if the caller sends more than
+                        // one feedback command before the next GETPIN.
+                        self.state.pin_from_cache = false;
+                    }
+                    self.state.error = Some(s);
+                }
             }
             Command::SetTitle(s) => self.state.title = Some(s),
             Command::SetOk(s) => self.state.ok = s,
@@ -349,11 +378,36 @@ impl<R: Read, W: Write> PinentryServer<R, W> {
 mod tests {
     use std::cell::RefCell;
     use std::io::Cursor;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
     struct RecordingUi {
         errors: RefCell<Vec<Option<String>>>,
+    }
+
+    struct RecordingKeychain {
+        lookups: Arc<Mutex<usize>>,
+        clears: Arc<Mutex<Vec<String>>>,
+        password: String,
+    }
+
+    impl Keychain for RecordingKeychain {
+        fn lookup(&self, _keygrip: &str) -> Option<crate::state::SecretBytes> {
+            *self.lookups.lock().unwrap() += 1;
+            Some(crate::state::SecretBytes::from(
+                self.password.as_bytes().to_vec(),
+            ))
+        }
+
+        fn save(&self, _keygrip: &str, _passphrase: &[u8]) -> miette::Result<()> {
+            Ok(())
+        }
+
+        fn clear(&self, keygrip: &str) -> miette::Result<bool> {
+            self.clears.lock().unwrap().push(keygrip.to_string());
+            Ok(true)
+        }
     }
 
     impl PinentryUi for RecordingUi {
@@ -409,5 +463,48 @@ mod tests {
             ui.errors.into_inner(),
             vec![Some("Bad Passphrase (try 2 of 3)".into()), None, None,]
         );
+    }
+
+    #[test]
+    fn rejected_cached_passphrase_is_cleared_before_next_getpin() {
+        let lookups = Arc::new(Mutex::new(0));
+        let clears = Arc::new(Mutex::new(Vec::new()));
+        let keychain = RecordingKeychain {
+            lookups: Arc::clone(&lookups),
+            clears: Arc::clone(&clears),
+            password: "bad".into(),
+        };
+        let mut server = PinentryServer::new(
+            Cursor::new(Vec::<u8>::new()),
+            Vec::<u8>::new(),
+            true,
+            60,
+            Some(Box::new(keychain)),
+        );
+        let ui = RecordingUi {
+            errors: RefCell::new(Vec::new()),
+        };
+
+        server
+            .handle_command(Command::SetKeyInfo("n/keygrip".into()), &ui)
+            .unwrap();
+        server
+            .handle_option("allow-external-password-cache", "")
+            .unwrap();
+        server.handle_command(Command::GetPin, &ui).unwrap();
+        assert_eq!(*lookups.lock().unwrap(), 1);
+        assert!(server.state.pin_from_cache);
+
+        server
+            .handle_command(Command::SetError("Bad passphrase".into()), &ui)
+            .unwrap();
+        assert_eq!(&*clears.lock().unwrap(), &["n/keygrip"]);
+        assert!(!server.state.pin_from_cache);
+
+        // Caller feedback prevents another cache lookup.  The UI is invoked
+        // instead (the test UI returns CANCELED).
+        assert!(server.handle_command(Command::GetPin, &ui).is_err());
+        assert_eq!(*lookups.lock().unwrap(), 1);
+        assert_eq!(ui.errors.into_inner(), vec![Some("Bad passphrase".into())]);
     }
 }
