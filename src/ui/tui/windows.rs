@@ -90,7 +90,7 @@ fn input_record_to_key(record: &INPUT_RECORD) -> Option<Key> {
             }
         }
         0x001B => Some(Key::Esc),
-        0x0000 => match key.wVirtualKeyCode as u32 {
+        0x0000 => match key.wVirtualKeyCode {
             VK_UP => Some(Key::Up),
             VK_DOWN => Some(Key::Down),
             VK_LEFT => Some(Key::Left),
