@@ -186,6 +186,8 @@ enum Key {
     Tab,
     BackTab,
     CtrlC,
+    Up,
+    Down,
     Left,
     Right,
 }
@@ -310,21 +312,22 @@ fn run_getpin(
                 }
 
                 let masked = "•".repeat(input.chars().count());
-                let input_style = if focus == GetPinFocus::Input {
+                let input_focused = focus == GetPinFocus::Input;
+                let input_style = if input_focused {
                     Style::default()
                         .fg(Color::White)
                         .add_modifier(Modifier::UNDERLINED)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                f.render_widget(
-                    Paragraph::new(Line::from(vec![
-                        Span::styled(format!("{prompt} "), Style::default().fg(Color::Yellow)),
-                        Span::styled(masked, input_style),
-                        Span::styled("▎", Style::default().fg(Color::White)),
-                    ])),
-                    chunks[2],
-                );
+                let mut input_line = vec![
+                    Span::styled(format!("{prompt} "), Style::default().fg(Color::Yellow)),
+                    Span::styled(masked, input_style),
+                ];
+                if input_focused {
+                    input_line.push(Span::styled("▎", Style::default().fg(Color::White)));
+                }
+                f.render_widget(Paragraph::new(Line::from(input_line)), chunks[2]);
 
                 let ok_s = btn_style(focus == GetPinFocus::Ok);
                 let cancel_s = btn_style(focus == GetPinFocus::Cancel);
@@ -369,11 +372,11 @@ fn handle_getpin_key(key: Key, focus: &mut GetPinFocus, input: &mut String) -> G
         _ => match *focus {
             GetPinFocus::Input => match key {
                 Key::Enter => GetPinAction::Submit,
-                Key::Tab => {
+                Key::Tab | Key::Down | Key::Right => {
                     *focus = focus.next();
                     GetPinAction::Continue
                 }
-                Key::BackTab => {
+                Key::BackTab | Key::Up | Key::Left => {
                     *focus = focus.prev();
                     GetPinAction::Continue
                 }
@@ -389,11 +392,11 @@ fn handle_getpin_key(key: Key, focus: &mut GetPinFocus, input: &mut String) -> G
             },
             GetPinFocus::Ok => match key {
                 Key::Enter | Key::Char(' ') => GetPinAction::Submit,
-                Key::Tab | Key::Right => {
+                Key::Tab | Key::Right | Key::Down => {
                     *focus = focus.next();
                     GetPinAction::Continue
                 }
-                Key::BackTab | Key::Left => {
+                Key::BackTab | Key::Left | Key::Up => {
                     *focus = focus.prev();
                     GetPinAction::Continue
                 }
@@ -401,11 +404,11 @@ fn handle_getpin_key(key: Key, focus: &mut GetPinFocus, input: &mut String) -> G
             },
             GetPinFocus::Cancel => match key {
                 Key::Enter | Key::Char(' ') => GetPinAction::Cancel,
-                Key::Tab | Key::Right => {
+                Key::Tab | Key::Right | Key::Down => {
                     *focus = focus.next();
                     GetPinAction::Continue
                 }
-                Key::BackTab | Key::Left => {
+                Key::BackTab | Key::Left | Key::Up => {
                     *focus = focus.prev();
                     GetPinAction::Continue
                 }
@@ -513,20 +516,20 @@ fn run_confirm(
             match focus {
                 ConfirmFocus::Ok => match key {
                     Key::Enter | Key::Char(' ') => return Ok(()),
-                    Key::Tab | Key::Right => focus = focus.next(has_notok),
-                    Key::BackTab | Key::Left => focus = ConfirmFocus::Cancel,
+                    Key::Tab | Key::Right | Key::Down => focus = focus.next(has_notok),
+                    Key::BackTab | Key::Left | Key::Up => focus = ConfirmFocus::Cancel,
                     _ => {}
                 },
                 ConfirmFocus::NotOk => match key {
                     Key::Enter | Key::Char(' ') => return Err(ErrorCode::NOT_CONFIRMED),
-                    Key::Tab | Key::Right => focus = focus.next(has_notok),
-                    Key::BackTab | Key::Left => focus = ConfirmFocus::Ok,
+                    Key::Tab | Key::Right | Key::Down => focus = focus.next(has_notok),
+                    Key::BackTab | Key::Left | Key::Up => focus = ConfirmFocus::Ok,
                     _ => {}
                 },
                 ConfirmFocus::Cancel => match key {
                     Key::Enter | Key::Char(' ') => return Err(ErrorCode::CANCELED),
-                    Key::Tab | Key::Right => focus = ConfirmFocus::Ok,
-                    Key::BackTab | Key::Left => {
+                    Key::Tab | Key::Right | Key::Down => focus = ConfirmFocus::Ok,
+                    Key::BackTab | Key::Left | Key::Up => {
                         focus = if has_notok {
                             ConfirmFocus::NotOk
                         } else {
@@ -652,5 +655,31 @@ fn btn_style(focused: bool) -> Style {
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn move_focus(key: Key, focus: &mut GetPinFocus) {
+        let mut input = String::new();
+        assert!(matches!(
+            handle_getpin_key(key, focus, &mut input),
+            GetPinAction::Continue
+        ));
+    }
+
+    #[test]
+    fn getpin_direction_keys_move_between_controls() {
+        let mut focus = GetPinFocus::Input;
+        move_focus(Key::Down, &mut focus);
+        assert_eq!(focus, GetPinFocus::Ok);
+        move_focus(Key::Right, &mut focus);
+        assert_eq!(focus, GetPinFocus::Cancel);
+        move_focus(Key::Up, &mut focus);
+        assert_eq!(focus, GetPinFocus::Ok);
+        move_focus(Key::Left, &mut focus);
+        assert_eq!(focus, GetPinFocus::Input);
     }
 }

@@ -126,6 +126,8 @@ fn read_key(tty_fd: std::os::unix::io::RawFd) -> Option<Key> {
                 let n2 = unsafe { libc::read(tty_fd, seq.as_mut_ptr() as *mut _, 2) };
                 if n2 >= 2 && seq[0] == b'[' {
                     match seq[1] {
+                        b'A' => return Some(Key::Up),
+                        b'B' => return Some(Key::Down),
                         b'D' => return Some(Key::Left),
                         b'C' => return Some(Key::Right),
                         b'Z' => return Some(Key::BackTab),

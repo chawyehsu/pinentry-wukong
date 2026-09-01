@@ -20,6 +20,8 @@ enum Key {
     Tab,
     BackTab,
     CtrlC,
+    Up,
+    Down,
     Left,
     Right,
 }
@@ -38,6 +40,8 @@ Reads one byte at a time from the TTY fd. When `0x1b` (ESC) is received, waits 5
 | `0x03` | CtrlC | ETX |
 | `0x09` | Tab | |
 | `0x1b` (alone, 50ms timeout) | Esc | No following bytes within 50ms |
+| `0x1b 0x5b 0x41` (`\x1b[A`) | Up | CSI sequence |
+| `0x1b 0x5b 0x42` (`\x1b[B`) | Down | CSI sequence |
 | `0x1b 0x5b 0x44` (`\x1b[D`) | Left | CSI sequence |
 | `0x1b 0x5b 0x43` (`\x1b[C`) | Right | CSI sequence |
 | `0x1b 0x5b 0x5a` (`\x1b[Z`) | BackTab | CSI sequence (xterm) |
@@ -58,7 +62,8 @@ Reads `INPUT_RECORD` via `ReadConsoleInputW`. Non-key events (mouse, focus, resi
 | `0x0009` | Tab | Without SHIFT |
 | `0x0009` + SHIFT | BackTab | `dwControlKeyState & 0x0010` |
 | `0x001b` | Esc | |
-| `0x0000` | *ignored* | Control character (e.g. arrow keys produce `0x0000` with `wVirtualKeyCode`) |
+| `0x0000` + arrow virtual key | Up/Down/Left/Right | Uses `wVirtualKeyCode` |
+| `0x0000` + other virtual key | *ignored* | Unhandled control/function key |
 | `0xD800..=0xDBFF` | *ignored* | UTF-16 high surrogate, waits for low |
 | Other | Char(c) | `char::from_u32(c as u32)` |
 
@@ -66,8 +71,8 @@ Reads `INPUT_RECORD` via `ReadConsoleInputW`. Non-key events (mouse, focus, resi
 
 The two platforms handle unrecognized input differently:
 
-- **Unix**: unknown CSI escape sequences (up/down arrows, mouse events, page up/down, etc.) are explicitly drained — remaining bytes are consumed through the sequence terminator (`m` or `M`) so they don't pollute the next `read_key` call. Bare ESC followed by non-`[` is also consumed and ignored.
-- **Windows**: the console delivers one parsed key event per `INPUT_RECORD`. Non-key events are filtered at the event type level. Keys that produce `UnicodeChar == 0x0000` (arrow keys, function keys) are silently ignored by the match.
+- **Unix**: unknown CSI escape sequences (mouse events, page up/down, etc.) are explicitly drained — remaining bytes are consumed through the sequence terminator (`m` or `M`) so they don't pollute the next `read_key` call. Bare ESC followed by non-`[` is also consumed and ignored.
+- **Windows**: the console delivers one parsed key event per `INPUT_RECORD`. Non-key events are filtered at the event type level. Arrow keys with `UnicodeChar == 0x0000` are mapped using `wVirtualKeyCode`; other such keys are silently ignored.
 
 Both approaches result in the same behavior: unrecognized inputs are discarded, and only the `Key` variants above reach the dialog logic.
 

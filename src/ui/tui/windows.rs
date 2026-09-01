@@ -8,6 +8,7 @@ use windows_sys::Win32::System::Console::{
     INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD, ReadConsoleInputW,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_LEFT, VK_RIGHT, VK_UP};
 
 use super::Key;
 use crate::state::PinentryState;
@@ -89,7 +90,13 @@ fn input_record_to_key(record: &INPUT_RECORD) -> Option<Key> {
             }
         }
         0x001B => Some(Key::Esc),
-        0x0000 => None, // control character we don't handle
+        0x0000 => match key.wVirtualKeyCode as u32 {
+            VK_UP => Some(Key::Up),
+            VK_DOWN => Some(Key::Down),
+            VK_LEFT => Some(Key::Left),
+            VK_RIGHT => Some(Key::Right),
+            _ => None,
+        },
         c if (0xD800..=0xDBFF).contains(&c) => None, // high surrogate, wait for low
         c => char::from_u32(c as u32).map(Key::Char),
     }
