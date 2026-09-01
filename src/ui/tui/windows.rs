@@ -20,7 +20,7 @@ pub(super) struct TtyGuard {
     saved_stdin: HANDLE,
     saved_stdout: HANDLE,
     conin: HANDLE,
-    _writer: ConsoleHandle,
+    writer: Option<ConsoleHandle>,
     _reader: ConsoleHandle,
     _source: ConsoleSource,
 }
@@ -41,7 +41,7 @@ impl TtyGuard {
             saved_stdin,
             saved_stdout,
             conin,
-            _writer: writer,
+            writer: Some(writer),
             _reader: reader,
             _source: source,
         })
@@ -49,6 +49,12 @@ impl TtyGuard {
 
     pub(super) fn handle(&self) -> HANDLE {
         self.conin
+    }
+
+    pub(super) fn take_writer(&mut self) -> miette::Result<ConsoleHandle> {
+        self.writer
+            .take()
+            .ok_or_else(|| miette::miette!("TUI console writer was already taken"))
     }
 }
 

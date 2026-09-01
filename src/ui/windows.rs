@@ -8,10 +8,11 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{
-    AllocConsole, AttachConsole, CONSOLE_MODE, ENABLE_PROCESSED_INPUT, FlushConsoleInputBuffer,
-    FreeConsole, GetConsoleMode, GetStdHandle, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD,
-    ReadConsoleInputW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode, SetStdHandle,
-    WriteConsoleW,
+    AllocConsole, AttachConsole, CONSOLE_MODE, CONSOLE_SCREEN_BUFFER_INFO, ENABLE_PROCESSED_INPUT,
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING, FlushConsoleInputBuffer, FreeConsole, GetConsoleMode,
+    GetConsoleScreenBufferInfo, GetStdHandle, INPUT_RECORD, KEY_EVENT, KEY_EVENT_RECORD,
+    ReadConsoleInputW, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode,
+    SetConsoleTextAttribute, SetStdHandle, WriteConsoleW,
 };
 use windows_sys::Win32::System::Threading::WaitForSingleObject;
 
@@ -98,6 +99,11 @@ impl ConsoleHandle {
             handle,
             original_mode,
         })
+    }
+
+    /// Enable VT output processing, restoring the original mode when the guard drops.
+    pub(super) fn enable_virtual_terminal_processing(&self) -> miette::Result<ConsoleModeGuard> {
+        self.set_mode(virtual_terminal_mode)
     }
 
     /// Read a line from the console, handling backspace. Reads until Enter.
@@ -253,6 +259,23 @@ impl Write for ConsoleHandle {
     }
 }
 
+pub(super) fn write_error(writer: &mut ConsoleHandle, error: &str) -> std::io::Result<()> {
+    let mut info = unsafe { std::mem::zeroed::<CONSOLE_SCREEN_BUFFER_INFO>() };
+    let colored = unsafe { GetConsoleScreenBufferInfo(writer.raw(), &mut info) } != 0;
+    if colored {
+        unsafe { SetConsoleTextAttribute(writer.raw(), info.wAttributes | 0x0004) };
+    }
+    let result = write!(writer, "{error}\r\n");
+    if colored {
+        unsafe { SetConsoleTextAttribute(writer.raw(), info.wAttributes) };
+    }
+    result
+}
+
+fn virtual_terminal_mode(mode: CONSOLE_MODE) -> CONSOLE_MODE {
+    mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+}
+
 /// Parse a `/conhost/<pid>` ttyname value, returning the PID if valid.
 pub(super) fn parse_conhost_pid(ttyname: &str) -> Option<u32> {
     let pid_str = ttyname.strip_prefix("/conhost/")?;
@@ -391,6 +414,15 @@ pub(super) fn restore_std_handles(saved_stdin: HANDLE, saved_stdout: HANDLE) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn virtual_terminal_mode_preserves_existing_flags() {
+        let mode = ENABLE_PROCESSED_INPUT;
+        assert_eq!(
+            virtual_terminal_mode(mode),
+            mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        );
+    }
 
     #[test]
     fn parse_conhost_pid_valid() {

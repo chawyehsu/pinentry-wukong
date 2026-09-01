@@ -3,7 +3,7 @@ use std::io::Write;
 use assuan::ErrorCode;
 
 use crate::state::{PinentryState, SecretBytes};
-use crate::ui::windows::resolve_console_handles;
+use crate::ui::windows::{resolve_console_handles, write_error};
 
 pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
     let (mut writer, reader, _source) =
@@ -13,7 +13,7 @@ pub(super) fn get_pin(state: &PinentryState) -> Result<SecretBytes, ErrorCode> {
         writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
     }
     if let Some(ref err) = state.error {
-        writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
+        write_error(&mut writer, err).map_err(|_| ErrorCode::GENERAL)?;
     }
     let prompt = &state.prompt;
     write!(writer, "{prompt} ").map_err(|_| ErrorCode::GENERAL)?;
@@ -38,7 +38,7 @@ pub(super) fn confirm(state: &PinentryState) -> Result<(), ErrorCode> {
         writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
     }
     if let Some(ref err) = state.error {
-        writeln!(writer, "ERROR: {err}").map_err(|_| ErrorCode::GENERAL)?;
+        write_error(&mut writer, err).map_err(|_| ErrorCode::GENERAL)?;
     }
 
     let ok_label = &state.ok;
@@ -74,6 +74,9 @@ pub(super) fn message(state: &PinentryState) -> Result<(), ErrorCode> {
 
     if let Some(ref desc) = state.description {
         writeln!(writer, "{desc}").map_err(|_| ErrorCode::GENERAL)?;
+    }
+    if let Some(ref err) = state.error {
+        write_error(&mut writer, err).map_err(|_| ErrorCode::GENERAL)?;
     }
     write!(writer, "[OK] ").map_err(|_| ErrorCode::GENERAL)?;
     writer.flush().map_err(|_| ErrorCode::GENERAL)?;

@@ -39,3 +39,7 @@ Which UI backend to use: `Tui` (ratatui widgets), `Tty` (line-based fallback), o
 
 **Secret Bytes**:
 A `Vec<u8>` wrapper that is zeroed on drop. Holds passphrase data securely.
+
+**Caller Feedback**:
+Text supplied by the Assuan caller to explain the current UI action, such as an incorrect passphrase. It is displayed verbatim for the next UI action and then consumed.
+_Avoid_: locally generated retry message, `ERROR:` prefix
