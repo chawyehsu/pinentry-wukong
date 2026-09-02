@@ -51,6 +51,12 @@ jobs:
       - name: Cache Setup
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
+      - name: DBus requirements (Linux Secret Service)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt install -y libdbus-1-dev pkg-config
+
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
