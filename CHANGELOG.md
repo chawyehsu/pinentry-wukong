@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/chawyehsu/pinentry-wukong/compare/v0.1.1...v0.1.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* **ci:** use runner.os in workflow conditions ([c968c8d](https://github.com/chawyehsu/pinentry-wukong/commit/c968c8d674356a6b23fe224294255f8741324b88))
+
 ## [0.1.1](https://github.com/chawyehsu/pinentry-wukong/compare/v0.1.0...v0.1.1) (2026-09-02)
 
 
