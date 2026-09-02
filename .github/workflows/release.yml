@@ -40,4 +40,4 @@ jobs:
     needs: [build, cargo_publish]
     steps:
       - name: Draft Release
-        uses: chawyehsu/actions/create-release@9773d15823b8c49b477a78ae968355a3e8fe5cda # v1.2.0
+        uses: chawyehsu/actions/create-release@39efbf77de6aa263da59da5e12ee36e2c1bb174e # v1.3.0
