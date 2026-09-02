@@ -16,6 +16,12 @@ jobs:
               zip: pinentry-wukong-x86_64-pc-windows-msvc.zip,
             }
           - {
+              name: "Windows ARM",
+              target: aarch64-pc-windows-msvc,
+              os: windows-11-arm,
+              zip: pinentry-wukong-aarch64-pc-windows-msvc.zip,
+            }
+          - {
               name: "Linux x86_64",
               target: x86_64-unknown-linux-gnu,
               os: ubuntu-latest,
