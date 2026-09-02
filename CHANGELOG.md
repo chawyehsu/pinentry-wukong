@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/chawyehsu/pinentry-wukong/compare/v0.1.2...v0.1.3) (2026-09-02)
+
+
+### Bug Fixes
+
+* **ci-release:** install dbus dependencies on Linux ([c5e2623](https://github.com/chawyehsu/pinentry-wukong/commit/c5e2623f13fe719df9a9726c285de77fa7cf7dc3))
+
 ## [0.1.2](https://github.com/chawyehsu/pinentry-wukong/compare/v0.1.1...v0.1.2) (2026-09-02)
 
 
