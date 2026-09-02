@@ -75,13 +75,13 @@ jobs:
           "${STRIP}" target/${{ matrix.target }}/release/pinentry-wukong
 
       - name: Prepare Artifacts [Unix]
-        if: matrix.os != 'windows-latest'
+        if: runner.os != 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/pinentry-wukong .
           tar czvf ${{ matrix.zip }} pinentry-wukong LICENSE README.md
 
       - name: Prepare Artifacts [Windows]
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/pinentry-wukong.exe .
           7z a ${{ matrix.zip }} pinentry-wukong.exe LICENSE README.md
